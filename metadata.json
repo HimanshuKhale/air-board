@@ -1,0 +1,10 @@
+{
+  "name": "SAAI AirBoard",
+  "description": "Hand-controlled contactless digital whiteboard for presenters, educators, and trainers using webcam tracking.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
