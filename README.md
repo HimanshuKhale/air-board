@@ -1,0 +1,151 @@
+# SAAI AirBoard
+
+A local hand-controlled teaching whiteboard for Windows. Point with your index finger, pinch to draw, and share a clean Presentation window in your teaching app. Mouse and touch work alongside hand input.
+
+Built with Vite, TypeScript, Canvas and MediaPipe Hand Landmarker. No React, backend, database, authentication, API key, remote inference, analytics or runtime CDN.
+
+## Run on this laptop
+
+Prerequisites: Node.js **22.12 or newer** and a current **Microsoft Edge or Google Chrome**. Node 22.22.0 and headless Edge were used for automated verification.
+
+Open PowerShell:
+
+```powershell
+cd E:\SAAI_AirBoard\hand-sign-projection
+npm.cmd install
+npm.cmd run dev
+```
+
+Open **http://127.0.0.1:5173**. Studio is also at /studio; Presentation is at /present. Use the same exact origin in both windows: localhost and 127.0.0.1 are different origins. The server binds only to loopback.
+
+The .cmd form works with PowerShell's default script restrictions; in Command Prompt, npm install and npm run dev work too. No execution-policy change is needed.
+
+This delivery is a local repository folder, not a published Git remote. If you later clone it, replace the first line with cd into your clone's hand-sign-projection directory, then run the same commands. For an exact locked dependency reinstall use npm.cmd ci.
+
+Install automatically:
+1. Installs npm dependencies.
+2. Copies the MediaPipe WASM loaders/binaries into public/vendor/mediapipe.
+3. Downloads and verifies the versioned hand model into public/models.
+4. Bundles a local classic inference worker.
+
+The first setup needs internet. Afterward runtime works offline while the localhost server is running. No model download occurs when the cached checksum matches. Do not open index.html directly using file://.
+
+## Production/offline serving
+
+```powershell
+npm.cmd run build
+npm.cmd run preview
+```
+
+Open **http://127.0.0.1:4173**. The production build includes the model, WASM and worker. Keep dist and installed tooling on the laptop. Stop the server with Ctrl+C. All processing stays on this device; the localhost static server does not receive camera frames.
+
+To repair missing assets:
+
+```powershell
+npm.cmd run setup:assets
+npm.cmd run setup:worker
+npm.cmd run build
+```
+
+## Teach with AirBoard
+
+1. Choose a camera in Studio, then Start camera and allow browser access.
+2. Raise **one open hand**. The index fingertip is the pointer. Open your hand once before your first pinch and after tracking loss.
+3. Select Pen, a color and a size. Move without pinching to hover. Bring thumb and index together to press; move to draw; release to stop.
+4. Try Highlighter or Eraser. Erasing removes only the transparent drawing layer, so backgrounds can change safely.
+5. Select a white/black/custom board, local image, or camera background. Image/camera fit supports contain, cover and stretch; camera supports mirroring and dimming. Image position sliders adjust alignment/cropping; Center image resets both axes.
+6. Open Presentation, move it to your teaching monitor, and screen-share that window in Meet, Zoom, Teams or OBS. Press F for fullscreen.
+7. Save PNG for background + drawing, or Drawing only for transparent PNG. Camera export captures the current frame only when requested.
+
+Studio and Presentation share drawing history and settings through the browser. When Presentation takes the camera, Studio shows its status instead of opening a second preview. Studio remains a control panel. A camera-background export from Studio downloads in the camera-owning window. You can use /present alone; its Settings and Background buttons expose setup controls.
+
+The Presentation toolbar hides after inactivity; move to the **top edge of the board** or press T to reveal it. Studio's toolbar moves inside the board while its camera is active, making it reachable by the hand pointer. Preset colors/sizes are pinch-friendly. Native file/color pickers and fullscreen may require a trusted mouse click or key press. Clear is an explicit button and is undoable; no gesture shortcut clears the board.
+
+## Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| P | Pen |
+| H | Highlighter |
+| E | Eraser |
+| Ctrl+Z | Undo |
+| Ctrl+Y or Ctrl+Shift+Z | Redo |
+| F | Toggle fullscreen |
+| Escape | Leave fullscreen / close a dialog |
+| T | Reveal Presentation controls |
+| Space | Pause/resume hand input (mouse stays usable) |
+
+Shortcuts do not intercept typing in form fields or settings dialogs. Ctrl also supports the platform Meta key for undo/redo.
+
+## Calibration
+
+Calibration is optional. Defaults are mirror on, EMA response 0.6, close ratio 0.28, release ratio 0.42 and close debounce 65 ms. The pinch ratio compares tip distance to palm size, with camera aspect correction. Lower pointer response adds smoothing; higher response follows the finger more quickly.
+
+Calibration shows hand detection, raw/smoothed coordinates, pinch ratio/phase, and local FPS/inference timing. The red debug dot is raw; green is smoothed. Hand Landmarker uses configured detection/presence/tracking thresholds of 0.65. It does not expose a useful per-frame detection confidence value, so the UI does not invent one. Reset calibration restores defaults without clearing your drawing.
+
+Debug is off by default and local to each window. Closing calibration removes its overlay. Debug, cursor and controls never appear in PNG export.
+
+## Verification commands
+
+```powershell
+npm.cmd run typecheck
+npm.cmd test
+npm.cmd run build
+npm.cmd run test:ui
+```
+
+The browser suite uses installed Microsoft Edge in **headless** mode and serves the production build automatically at port 4173. Run build before test:ui after changing code. It needs no real webcam: permission denial and synthetic video are explicitly supplied by tests. If Edge is absent, install it or change the Playwright channel in playwright.config.ts to chrome for an installed Chrome.
+
+Unit tests cover transforms/mirroring, normalized pinch/hysteresis/debounce, smoothing, stroke/history/eraser actions, export naming and message validation. Browser tests cover actual Canvas pixels, undo/redo/clear, highlighter opacity, local image loading, PNG dimensions/transparency, cross-window snapshots and leader handover, camera error UI, toolbar hiding, and real local worker model/WASM execution.
+
+**Automated passes do not mean your webcam has been validated.** Complete [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) before a class, especially pinch reliability, tracking loss/reacquisition, mirror alignment, latency, camera switching, second-monitor fullscreen, screen sharing and offline operation. No separate lint configuration is present; strict TypeScript checks include unused code.
+
+This delivery passed 17 unit tests and 8 headless Edge integration tests. See [docs/VERIFICATION.md](docs/VERIFICATION.md) for exact coverage and unverified hardware scenarios.
+
+## Privacy
+
+> Camera processing happens locally on this device. Video is not uploaded or recorded.
+
+There is no audio capture. No video recording, frame persistence, external telemetry or cloud account. Only an intentional camera-background export saves a webcam frame as part of your PNG. Images and drawing state remain in browser memory and are shared only across this application's same-origin windows. Setup downloads packages/model; normal runtime requests only localhost assets.
+
+See [asset provenance](docs/THIRD_PARTY_ASSETS.md) and public/asset-manifest.json for original URLs, pinned model checksum and runtime hashes.
+
+## Limitations and troubleshooting
+
+- **Memory-only sessions:** closing/reloading the final window loses editable drawing history and uploaded images. Save PNG before closing. Opening another window receives the existing session. There is no editable board import/autosave in this MVP.
+- **One hand, one active stroke:** use one hand in good, even lighting. The tracker can confuse overlapping hands or occlusion. Open before pinching after loss. A 250 ms stale-tracking watchdog ends input safely.
+- **Camera unavailable:** allow camera access through the browser address-bar icon. Close another app using the webcam, reconnect it, select the device, and retry. Start in another AirBoard window deliberately transfers ownership.
+- **Camera in Presentation:** this is expected. Studio does not duplicate or relay camera pixels. Start Camera in Studio transfers capture back. Closing the owner does not automatically restart the camera elsewhere.
+- **Lag:** keep Presentation visible, improve lighting, and try a different webcam. The CPU worker is adaptive; 20–30 tracking FPS is a target, not a hardware guarantee. Background browser tabs may be throttled. Mouse input remains available.
+- **Controls change tool size:** selecting Pen, Highlighter or Eraser chooses practical defaults (6, 24, 48 logical pixels); adjust Size afterward.
+- **Long sessions:** vector history grows in memory; undo replays committed actions. A single held stroke accepts up to 12,000 points; release and begin another stroke for unusually long holds.
+- **Export:** fixed 1600×900 PNG, matching the logical 16:9 board. Camera export needs an active camera; image export needs a loaded image. Export does not include screen-share UI. This is not an OS-wide pointer or slide-control tool.
+- **Popup blocked:** allow localhost popups, or open /present directly and start its camera.
+- **Missing model/worker:** rerun setup:assets and setup:worker, then rebuild. No silent remote-CDN fallback exists.
+- **Port in use:** stop the previous dev/preview server. Ports 5173 and 4173 are strict so windows do not accidentally join different origins.
+- **npm resolver crash:** .npmrc uses legacy-peer-deps to avoid an npm 10 optional-peer resolution crash observed during setup. The committed lockfile records the verified dependency tree.
+- **Offline does not mean no server:** keep the local Vite/preview process running. There is no service worker or installed PWA.
+
+## Exact module inventory
+
+| Files | Responsibility |
+| --- | --- |
+| src/main.ts, src/styles.css | Application composition, render loop, design tokens and layout |
+| src/core/types.ts, settings.ts, coordinates.ts | Generic board types, defaults and coordinate spaces |
+| src/camera/manager.ts, session.ts | Devices/stream lifecycle and exclusive camera ownership |
+| src/tracking/hand.worker.ts, tracker.ts | MediaPipe worker and throttled frame scheduler |
+| src/input/pinch.ts, filter.ts, gesture.ts, router.ts | Pinch machine, smoothing, generic gesture adapter and mouse/touch/hand routing |
+| src/drawing/history.ts, engine.ts | Action history and transparent path rendering |
+| src/background/renderer.ts | Local images, blank/video backgrounds and fitting |
+| src/export/compositor.ts | UI-free PNG composition and download |
+| src/sync/protocol.ts, channel.ts | Validated state reducer, BroadcastChannel and leader election |
+| src/debug/metrics.ts | In-memory performance counters |
+| src/ui/studio.ts, presentation.ts, toolbar.ts, dialogs.ts, controls.ts, overlay.ts, icons.ts | Modular views, accessible controls and temporary diagnostics |
+| scripts/setup-assets.mjs, build-worker.mjs | Local model/WASM setup and classic-worker bundling |
+| tests/unit/core.test.ts, tests/browser/app.spec.ts, camera.spec.ts, hand-input.spec.ts | Logic, browser UI, synthetic camera and generic hand-input integration tests |
+| public/favicon.svg, public/asset-manifest.json | Original favicon and generated asset hashes |
+| package.json, package-lock.json, .npmrc, .gitignore | Commands, dependency lock and setup configuration |
+| index.html, tsconfig.json, vite.config.ts, playwright.config.ts | HTML/CSP, strict TypeScript, Vite/Vitest and browser tests |
+| README.md, docs/ARCHITECTURE.md, docs/THIRD_PARTY_ASSETS.md, docs/MANUAL_TEST_CHECKLIST.md, docs/VERIFICATION.md | Setup, design decisions, provenance, hardware acceptance and verification evidence |
+
+Detailed design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

@@ -1,0 +1,28 @@
+import { button } from './toolbar';
+export function dialogs(): string {
+  return `<dialog id="settings-dialog"><div class="dialog-heading"><div><p class="eyebrow">MAKE IT FEEL NATURAL</p><h2>Calibration & settings</h2></div><button type="button" data-action="close-settings" aria-label="Close settings">✕</button></div>
+    <p class="dialog-intro">Raise one open hand, then bring your thumb and index fingertip together. Release before drawing again after tracking is lost.</p>
+    <div class="calibration-readout" id="calibration-readout">Start the camera to check your hand pointer.</div>
+    <label class="check-field"><input type="checkbox" data-pipeline-debug> Show tracking diagnostics</label>
+    <label class="field">Pointer response <span class="muted">Lower is smoother; higher is faster.</span><input type="range" min="0.1" max="1" step="0.05" data-setting="smoothing" aria-label="Pointer response"></label>
+    <label class="field">Pinch close ratio<input type="range" min="0.1" max="0.38" step="0.01" data-setting="pinchClose" aria-label="Pinch close ratio"></label>
+    <label class="field">Pinch release ratio<input type="range" min="0.4" max="0.8" step="0.01" data-setting="pinchOpen" aria-label="Pinch release ratio"></label>
+    <label class="field">Pinch debounce (milliseconds)<input type="range" min="30" max="200" step="5" data-setting="debounceMs" aria-label="Pinch debounce"></label>
+    <label class="check-field"><input type="checkbox" data-setting="mirror"> Mirror camera & hand pointer</label>
+    <label class="check-field"><input type="checkbox" data-setting="autoHide"> Auto-hide Presentation controls</label>
+    <label class="field">Pen opacity<input type="range" min="0.05" max="1" step="0.05" data-setting="opacity" aria-label="Pen opacity"></label>
+    <div class="dialog-actions">${button('reset-settings', 'Reset calibration', 'undo')}${button('close-settings', 'Done', 'chevron', 'class="primary"')}</div>
+    <p class="shortcut-note">P Pen · H Highlighter · E Eraser · Ctrl+Z Undo · Ctrl+Y Redo · F Fullscreen · T Toolbar · Space Pause hand</p>
+  </dialog>
+  <dialog id="background-dialog"><div class="dialog-heading"><h2>Presentation background</h2><button type="button" data-action="close-background" aria-label="Close background">✕</button></div>
+    <div class="background-tabs">${button('bg-blank', 'Board', 'board')}${button('bg-camera', 'Camera', 'camera')}${button('bg-image', 'Image', 'image')}</div>
+    <label class="field">Board color<input type="color" data-setting="board-color" aria-label="Presentation board color"></label>
+    <label class="field">Choose image<input type="file" id="present-image-upload" accept="image/png,image/jpeg,image/webp"></label>
+    <label class="field">Fit<select data-setting="fit" aria-label="Presentation background fit"><option value="contain">Contain</option><option value="cover">Cover</option><option value="stretch">Stretch</option></select></label>
+    <div data-image-controls hidden><label class="field">Image horizontal position<input type="range" min="0" max="1" step="0.01" data-setting="positionX" aria-label="Presentation image horizontal position"></label><label class="field">Image vertical position<input type="range" min="0" max="1" step="0.01" data-setting="positionY" aria-label="Presentation image vertical position"></label>${button('reset-image', 'Center image', 'undo')}</div>
+    <label class="check-field"><input type="checkbox" data-setting="mirror"> Mirror camera & hand pointer</label>
+    <label class="field">Camera dimming<input type="range" data-setting="dim" min="0" max="0.8" step="0.05" aria-label="Presentation camera dimming"></label>
+    <label class="field">Camera<select id="present-camera-select" aria-label="Presentation camera"><option value="">Default camera</option></select></label>
+    <div class="dialog-actions">${button('start-camera', 'Start selected camera', 'camera')}${button('close-background', 'Done', 'chevron', 'class="primary"')}</div>
+  </dialog><div id="toast" class="toast" role="status"></div><div id="hand-cursor" class="hand-cursor" hidden><span></span></div>`;
+}

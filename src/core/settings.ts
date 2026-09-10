@@ -1,0 +1,8 @@
+import type { BoardState, Settings } from './types';
+export const defaults = (): Settings => ({
+  brush: { tool: 'pen', color: '#225c4a', size: 6, opacity: 1 },
+  background: { mode: 'blank', color: '#ffffff', image: null, fit: 'contain', mirror: true, dim: 0.15, positionX: 0.5, positionY: 0.5 },
+  smoothing: 0.6, pinchClose: 0.28, pinchOpen: 0.42, debounceMs: 65,
+  paused: false, autoHide: true,
+});
+export const initialState = (): BoardState => ({ settings: defaults(), history: { actions: [], position: 0, active: null } });
