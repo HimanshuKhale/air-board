@@ -4,6 +4,24 @@ export function dialogs(): string {
     <p class="dialog-intro">Raise one open hand, then bring your thumb and index fingertip together. Release before drawing again after tracking is lost.</p>
     <div class="calibration-readout" id="calibration-readout">Start the camera to check your hand pointer.</div>
     <label class="check-field"><input type="checkbox" data-pipeline-debug> Show tracking diagnostics</label>
+    <h3>Hand input</h3>
+    <label class="field">Dominant hand<select data-setting="dominantHand"><option value="Right">Right</option><option value="Left">Left</option></select></label>
+    <label class="field">Pointer mode<select data-setting="inputMode"><option value="finger">Finger</option><option value="stylus">Stylus Assist</option></select></label>
+    <label class="field">Gesture sensitivity<select data-setting="gestureSensitivity"><option value="gentle">Gentle</option><option value="balanced">Balanced</option><option value="responsive">Responsive</option></select></label>
+    <details><summary>Advanced gesture settings</summary>
+      <label class="field">Open-palm hold (milliseconds)<input type="range" min="150" max="250" step="10" data-setting="openPalmHoldMs"></label>
+      <label class="field">Palm eraser diameter<input type="range" min="30" max="160" step="2" data-setting="palmEraserSize"></label>
+      <label class="field">Lasso close radius<input type="range" min="25" max="120" step="5" data-setting="lassoCloseRadius"></label>
+      <label class="field">Fist grab radius<input type="range" min="25" max="160" step="5" data-setting="fistGrabRadius"></label>
+      <label class="field">Two-hand toggle hold (milliseconds)<input type="range" min="400" max="600" step="25" data-setting="twoHandHoldMs"></label>
+      <label class="field">Two-hand proximity<input type="range" min="0.08" max="0.5" step="0.01" data-setting="twoHandProximity"></label>
+    </details>
+    <h3>Stylus Assist</h3>
+    <p class="muted" data-stylus-status>Default virtual nib offset</p>
+    <div class="dialog-actions">${button('calibrate-stylus', 'Calibrate stylus', 'settings')}${button('reset-stylus', 'Reset stylus', 'undo')}</div>
+    <h3>Writing plane</h3>
+    <p class="muted" data-plane-status>Not calibrated</p>
+    <div class="dialog-actions">${button('calibrate-plane', 'Calibrate plane', 'settings')}${button('reset-plane', 'Reset plane', 'undo')}</div>
     <label class="field">Pointer response <span class="muted">Lower is smoother; higher is faster.</span><input type="range" min="0.1" max="1" step="0.05" data-setting="smoothing" aria-label="Pointer response"></label>
     <label class="field">Pinch close ratio<input type="range" min="0.1" max="0.38" step="0.01" data-setting="pinchClose" aria-label="Pinch close ratio"></label>
     <label class="field">Pinch release ratio<input type="range" min="0.4" max="0.8" step="0.01" data-setting="pinchOpen" aria-label="Pinch release ratio"></label>

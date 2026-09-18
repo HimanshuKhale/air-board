@@ -1,6 +1,6 @@
 # SAAI AirBoard
 
-A local hand-controlled teaching whiteboard for Windows. Point with your index finger, pinch to draw, and share a clean Presentation window in your teaching app. Mouse and touch work alongside hand input.
+A local hand-controlled teaching whiteboard for Windows. Pinch to draw, open a palm to erase, point to lasso, form a fist to move strokes, and bring two hands together to pause or resume hand control. Mouse and touch work alongside hand input.
 
 Built with Vite, TypeScript, Canvas and MediaPipe Hand Landmarker. No React, backend, database, authentication, API key, remote inference, analytics or runtime CDN.
 
@@ -50,12 +50,13 @@ npm.cmd run build
 ## Teach with AirBoard
 
 1. Choose a camera in Studio, then Start camera and allow browser access.
-2. Raise **one open hand**. The index fingertip is the pointer. Open your hand once before your first pinch and after tracking loss.
-3. Select Pen, a color and a size. Move without pinching to hover. Bring thumb and index together to press; move to draw; release to stop.
-4. Try Highlighter or Eraser. Erasing removes only the transparent drawing layer, so backgrounds can change safely.
-5. Select a white/black/custom board, local image, or camera background. Image/camera fit supports contain, cover and stretch; camera supports mirroring and dimming. Image position sliders adjust alignment/cropping; Center image resets both axes.
-6. Open Presentation, move it to your teaching monitor, and screen-share that window in Meet, Zoom, Teams or OBS. Press F for fullscreen.
-7. Save PNG for background + drawing, or Drawing only for transparent PNG. Camera export captures the current frame only when requested.
+2. Choose the dominant hand in Settings. Open it once before the first pinch and after tracking loss.
+3. Pinch with the dominant hand to draw. Hold an open palm briefly to erase, trace a closed loop with only the index extended to select, or hold a fist near a stroke/selection to drag it.
+4. Bring both palm centers close for about half a second to pause or resume hand input. Separate them before toggling again. Mouse and touch remain available while paused.
+5. Optionally calibrate a four-corner physical writing plane or choose Stylus Assist and calibrate its virtual nib offset.
+6. Select a white/black/custom board, local image, or camera background. Image/camera fit supports contain, cover and stretch; camera supports mirroring and dimming.
+7. Open Presentation, move it to your teaching monitor, and screen-share that window. Press F for fullscreen.
+8. Save PNG for background + drawing, or Drawing only for transparent PNG.
 
 Studio and Presentation share drawing history and settings through the browser. When Presentation takes the camera, Studio shows its status instead of opening a second preview. Studio remains a control panel. A camera-background export from Studio downloads in the camera-owning window. You can use /present alone; its Settings and Background buttons expose setup controls.
 
@@ -81,6 +82,8 @@ Shortcuts do not intercept typing in form fields or settings dialogs. Ctrl also 
 
 Calibration is optional. Defaults are mirror on, EMA response 0.6, close ratio 0.28, release ratio 0.42 and close debounce 65 ms. The pinch ratio compares tip distance to palm size, with camera aspect correction. Lower pointer response adds smoothing; higher response follows the finger more quickly.
 
+Writing-plane calibration captures Top Left, Top Right, Bottom Right and Bottom Left in normalized camera space, validates a convex non-degenerate quadrilateral, and computes a projective homography to the 1600Ã—900 board. Hand settings and calibration points are stored locally. Stylus Assist estimates a nib from the thumb/index midpoint and palm orientation; it does not detect the physical pen or use another model.
+
 Calibration shows hand detection, raw/smoothed coordinates, pinch ratio/phase, and local FPS/inference timing. The red debug dot is raw; green is smoothed. Hand Landmarker uses configured detection/presence/tracking thresholds of 0.65. It does not expose a useful per-frame detection confidence value, so the UI does not invent one. Reset calibration restores defaults without clearing your drawing.
 
 Debug is off by default and local to each window. Closing calibration removes its overlay. Debug, cursor and controls never appear in PNG export.
@@ -96,11 +99,11 @@ npm.cmd run test:ui
 
 The browser suite uses installed Microsoft Edge in **headless** mode and serves the production build automatically at port 4173. Run build before test:ui after changing code. It needs no real webcam: permission denial and synthetic video are explicitly supplied by tests. If Edge is absent, install it or change the Playwright channel in playwright.config.ts to chrome for an installed Chrome.
 
-Unit tests cover transforms/mirroring, normalized pinch/hysteresis/debounce, smoothing, stroke/history/eraser actions, export naming and message validation. Browser tests cover actual Canvas pixels, undo/redo/clear, highlighter opacity, local image loading, PNG dimensions/transparency, cross-window snapshots and leader handover, camera error UI, toolbar hiding, and real local worker model/WASM execution.
+Unit tests cover gesture geometry and timing, homography, lasso selection, nearest-segment grabs, move undo/redo, two-hand debounce/cooldown, Stylus Assist geometry, frame transport and existing drawing behavior. Browser tests cover Canvas output, synchronization, camera ownership, synthetic video, worker/model/WASM execution and a local known-hand fixture.
 
 **Automated passes do not mean your webcam has been validated.** Complete [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) before a class, especially pinch reliability, tracking loss/reacquisition, mirror alignment, latency, camera switching, second-monitor fullscreen, screen sharing and offline operation. No separate lint configuration is present; strict TypeScript checks include unused code.
 
-This delivery passed 17 unit tests and 8 headless Edge integration tests. See [docs/VERIFICATION.md](docs/VERIFICATION.md) for exact coverage and unverified hardware scenarios.
+This delivery passed 54 unit tests and 12 headless Edge integration tests. See [docs/VERIFICATION.md](docs/VERIFICATION.md), [camera diagnostics](docs/CAMERA_PIPELINE_DIAGNOSTICS.md), and the [M2â€“M5 design record](docs/M2_M5.md).
 
 ## Privacy
 
@@ -113,7 +116,7 @@ See [asset provenance](docs/THIRD_PARTY_ASSETS.md) and public/asset-manifest.jso
 ## Limitations and troubleshooting
 
 - **Memory-only sessions:** closing/reloading the final window loses editable drawing history and uploaded images. Save PNG before closing. Opening another window receives the existing session. There is no editable board import/autosave in this MVP.
-- **One hand, one active stroke:** use one hand in good, even lighting. The tracker can confuse overlapping hands or occlusion. Open before pinching after loss. A 250 ms stale-tracking watchdog ends input safely.
+- **Landmark visibility:** use even lighting and keep the manipulating hand visible. Two hands are used only for the global pause/resume gesture. A 250 ms stale-tracking watchdog cancels in-flight hand interactions safely.
 - **Camera unavailable:** allow camera access through the browser address-bar icon. Close another app using the webcam, reconnect it, select the device, and retry. Start in another AirBoard window deliberately transfers ownership.
 - **Camera in Presentation:** this is expected. Studio does not duplicate or relay camera pixels. Start Camera in Studio transfers capture back. Closing the owner does not automatically restart the camera elsewhere.
 - **Lag:** keep Presentation visible, improve lighting, and try a different webcam. The CPU worker is adaptive; 20–30 tracking FPS is a target, not a hardware guarantee. Background browser tabs may be throttled. Mouse input remains available.
@@ -134,8 +137,9 @@ See [asset provenance](docs/THIRD_PARTY_ASSETS.md) and public/asset-manifest.jso
 | src/core/types.ts, settings.ts, coordinates.ts | Generic board types, defaults and coordinate spaces |
 | src/camera/manager.ts, session.ts | Devices/stream lifecycle and exclusive camera ownership |
 | src/tracking/hand.worker.ts, tracker.ts | MediaPipe worker and throttled frame scheduler |
-| src/input/pinch.ts, filter.ts, gesture.ts, router.ts | Pinch machine, smoothing, generic gesture adapter and mouse/touch/hand routing |
-| src/drawing/history.ts, engine.ts | Action history and transparent path rendering |
+| src/input/, src/interaction/ | Pinch machine, smoothing, pointer routing, geometric poses, central arbitration, two-hand toggle and Stylus Assist |
+| src/calibration/, src/selection/ | Homography/local calibration persistence and lasso/nearest-stroke geometry |
+| src/drawing/history.ts, engine.ts | Stroke/clear/move history, live move previews and transparent rendering |
 | src/background/renderer.ts | Local images, blank/video backgrounds and fitting |
 | src/export/compositor.ts | UI-free PNG composition and download |
 | src/sync/protocol.ts, channel.ts | Validated state reducer, BroadcastChannel and leader election |

@@ -7,7 +7,7 @@ export type Signal = { kind: 'camera-request' | 'camera-status' | 'export-reques
 export class BoardChannel {
   readonly id = crypto.randomUUID();
   readonly channel = new BroadcastChannel('saai-airboard-v1');
-  state: BoardState = initialState();
+  state: BoardState;
   ready = false;
   leader = false;
   private revision = 0;
@@ -21,7 +21,8 @@ export class BoardChannel {
   private activeAt = 0;
   onChange: (command?: Command) => void = () => {};
   onSignal: (signal: Signal) => void = () => {};
-  constructor() {
+  constructor(state: BoardState = initialState()) {
+    this.state = state;
     this.channel.onmessage = event => this.receive(event.data);
     this.channel.postMessage({ v: 1, kind: 'hello', sender: this.id });
     this.retry = setInterval(() => {

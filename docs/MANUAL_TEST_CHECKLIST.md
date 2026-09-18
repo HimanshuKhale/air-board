@@ -29,6 +29,11 @@ Record laptop/CPU, Windows version, Chrome/Edge version, webcam, lighting, date,
 - [ ] Lose hand visibility mid-stroke: drawing stops. Re-enter already pinched: no drawing. Open, then pinch: a new stroke starts without a connecting line.
 - [ ] Move rapidly or show a second hand: check that unexpected hand switches do not create long lines. Use one hand for reliable MVP operation.
 - [ ] Pause hand input (Space or button): gestures stop, while mouse/touch remain usable.
+- [ ] Hold the dominant hand open for about 200 ms: the palm-centered eraser appears at its real diameter and erases continuously until the pose changes.
+- [ ] Extend only the dominant index finger, trace a sufficiently large closed loop, and confirm enclosed strokes show selection bounds. Tiny/open loops do not select.
+- [ ] Form a fist near the selection, drag, and release. Undo moves it back in one step; redo reapplies it. With no selection, only the nearest strand inside the grab radius moves.
+- [ ] Start lasso/erase/drag, then hide the hand. The action stops or cancels and does not bridge when the hand returns.
+- [ ] Bring two palm centers close for about 500 ms. Confirm a pause toast, no hand drawing/erase/lasso/grab, and working mouse/touch. Separate and rejoin after cooldown to resume without continuing an old action.
 - [ ] Change focus, minimize, or switch tabs mid-stroke: no lingering press when you return.
 
 ## Controls and tools
@@ -63,6 +68,10 @@ Record laptop/CPU, Windows version, Chrome/Edge version, webcam, lighting, date,
 - [ ] Share only Presentation in Meet/Zoom/Teams/OBS. Confirm learners see a clean board. Debug is off by default and stays local to each window.
 
 ## Calibration and performance
+- [ ] Calibrate the writing plane in Top Left, Top Right, Bottom Right, Bottom Left order using a visibly skewed physical quadrilateral. Check corners and interior points map to the rectangular board; reload and confirm persistence.
+- [ ] Try duplicate, crossed, tiny, or concave corner placement and confirm calibration is rejected; reset and recalibrate.
+- [ ] Choose Stylus Assist, hold a pen naturally, align its physical tip to the center target and pinch. Verify virtual nib/ink alignment, persistence after reload, and reset. The pen itself is not detected.
+- [ ] In Debug, compare camera preview with Worker Input Preview. Verify dimensions, nonuniform opaque RGB pixels, advancing frame IDs, successful inference timestamps, handedness, gesture state, lasso/selection/grab state, plane state and virtual nib.
 - [ ] Calibration shows detected hand, raw/smoothed coordinates, pinch phase/ratio and thresholds.
 - [ ] Smoothing adjusts response; defaults restore sensible behavior.
 - [ ] On the target laptop, record tracking FPS, render FPS and inference duration. Check handwriting lag during a 10-minute teaching simulation.

@@ -4,7 +4,6 @@ import type { HandPointer } from '../input/gesture';
 import type { Settings, Size } from '../core/types';
 const edges = [[0,1,2,3,4],[0,5,6,7,8],[5,9,10,11,12],[9,13,14,15,16],[13,17,18,19,20],[0,17]];
 export function drawDebug(ctx: CanvasRenderingContext2D, pointer: HandPointer | null, camera: Size, settings: Settings, metrics: string): void {
-  ctx.clearRect(0, 0, BOARD.width, BOARD.height);
   ctx.save(); ctx.lineWidth = 2; ctx.strokeStyle = '#18c8ed';
   const map = (p: Point) => cameraToCanvas(p, camera, BOARD, settings.background.mirror, settings.background.mode === 'camera' ? settings.background.fit : 'stretch');
   if (pointer) {

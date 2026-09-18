@@ -22,7 +22,7 @@ describe('frame transport helpers', () => {
     expect(solid.fingerprint).not.toBe(varied.fingerprint);
   });
   it('leaves production thresholds unchanged and debug off', () => {
-    expect(MODEL_OPTIONS).toMatchObject({ runningMode: 'VIDEO', numHands: 1, delegate: 'CPU', minHandDetectionConfidence: 0.65, minHandPresenceConfidence: 0.65, minTrackingConfidence: 0.65 });
+    expect(MODEL_OPTIONS).toMatchObject({ runningMode: 'VIDEO', numHands: 2, delegate: 'CPU', minHandDetectionConfidence: 0.65, minHandPresenceConfidence: 0.65, minTrackingConfidence: 0.65 });
     expect(defaultDebug()).toEqual({ enabled: false, preview: false, threshold: 0.65, pipeline: 'canvas' });
   });
 });

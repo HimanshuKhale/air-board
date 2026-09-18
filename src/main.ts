@@ -4,17 +4,23 @@ import { presentation } from './ui/presentation';
 import { dialogs } from './ui/dialogs';
 import { bindControls, updateControls } from './ui/controls';
 import { BOARD } from './core/types';
-import { cameraToCanvas } from './core/coordinates';
+import { cameraToCanvas, canvasToClient } from './core/coordinates';
 import { BoardChannel } from './sync/channel';
 import { DrawingEngine } from './drawing/engine';
 import { BackgroundRenderer } from './background/renderer';
 import { composite, savePng } from './export/compositor';
 import { CameraSession } from './camera/session';
-import { GestureController, type HandPointer } from './input/gesture';
+import type { HandPointer } from './input/gesture';
 import { InputRouter } from './input/router';
 import { RateCounter } from './debug/metrics';
 import { drawDebug } from './ui/overlay';
 import { PipelineDebug } from './debug/pipeline';
+import { InteractionController } from './interaction/controller';
+import { initialState, defaults } from './core/settings';
+import { loadHandSettings, saveHandSettings } from './calibration/storage';
+import { PlaneMapper } from './calibration/homography';
+import { drawInteractionOverlay } from './ui/interaction-overlay';
+import { currentStrokes } from './drawing/history';
 
 const isPresentation = location.pathname === '/present';
 document.body.classList.toggle('is-presentation', isPresentation);
@@ -32,16 +38,38 @@ for (const canvas of [backgroundCanvas, overlayCanvas]) { canvas.width = BOARD.w
 const backgroundContext = backgroundCanvas.getContext('2d')!;
 const overlayContext = overlayCanvas.getContext('2d')!;
 const background = new BackgroundRenderer(video);
-const bus = new BoardChannel();
+const initial = initialState(); initial.settings = loadHandSettings(defaults());
+const bus = new BoardChannel(initial);
 const camera = new CameraSession(video, bus, isPresentation ? 'Presentation' : 'Studio');
 const pipelineDebug = new PipelineDebug(camera);
-const gestures = new GestureController();
 const input = new InputRouter(drawing.canvas, bus);
+const planeMapper = new PlaneMapper();
+const interactions = new InteractionController({
+  send: command => bus.send(command),
+  routePinch: (point, phase) => input.hand(point, phase),
+  endPinch: () => input.endHand(),
+  map: (point, size, settings) => {
+    const calibrated = planeMapper.map(point, settings.planePoints);
+    return calibrated ? { x: calibrated.x * BOARD.width, y: calibrated.y * BOARD.height } : cameraToCanvas(point, size, BOARD, settings.background.mirror, settings.background.mode === 'camera' ? settings.background.fit : 'stretch');
+  },
+  getState: () => bus.state,
+  previewMove: preview => drawing.setMovePreview(preview),
+  toast,
+  showPointer: (point, diameter, held, label) => {
+    const client = canvasToClient(point, drawing.canvas.getBoundingClientRect(), BOARD);
+    lastPointerTime = performance.now(); cursor.hidden = false;
+    cursor.style.left = client.x + 'px'; cursor.style.top = client.y + 'px';
+    const scaled = Math.max(12, diameter * drawing.canvas.getBoundingClientRect().width / BOARD.width);
+    cursor.style.width = scaled + 'px'; cursor.style.height = scaled + 'px'; cursor.style.setProperty('--cursor-color', label === 'E' ? '#e16357' : bus.state.settings.brush.color);
+    cursor.classList.toggle('held', held); cursor.classList.add('from-hand'); cursor.querySelector('span')!.textContent = label;
+  },
+});
 const renderRate = new RateCounter(), trackingRate = new RateCounter();
 let hand: HandPointer | null = null;
 let lastTracking = 0, inferenceMs = 0, backgroundDirty = true, debug = false, controlsUntil = performance.now() + 6000;
 let toastTimer = 0, lastMetrics = 0, lastPointerTime = 0;
 let previousGeometry = '';
+let previousPaused = bus.state.settings.paused;
 const cursor = el<HTMLDivElement>('hand-cursor');
 function toast(message: string): void {
   const target = el('toast'); target.textContent = message; target.classList.add('visible');
@@ -49,7 +77,7 @@ function toast(message: string): void {
 }
 function reveal(): void { controlsUntil = performance.now() + 5500; el('presentation-controls')?.classList.remove('controls-hidden'); }
 function releaseHand(): void {
-  hand = null; gestures.reset(); input.endHand(); camera.hand = false;
+  hand = null; interactions.reset(); input.endHand(); camera.hand = false;
   if (cursor.classList.contains('from-hand')) cursor.hidden = true;
   el('hand-dot')?.classList.remove('active');
 }
@@ -95,6 +123,10 @@ bindControls(bus, {
   },
   export: transparent => { void exportBoard(transparent); },
   toast, interrupt: () => input.cancelDrawing(), reveal,
+  calibratePlane: () => interactions.startPlaneCalibration(),
+  resetPlane: () => { interactions.resetPlaneCalibration(); planeMapper.reset(); },
+  calibrateStylus: () => interactions.startStylusCalibration(),
+  resetStylus: () => interactions.resetStylusCalibration(),
 });
 bus.onChange = command => {
   drawing.invalidate(!command || !['begin', 'point'].includes(command.type));
@@ -102,11 +134,13 @@ bus.onChange = command => {
     backgroundDirty = true;
     void background.setImage(bus.state.settings.background.image).then(() => { backgroundDirty = true; }).catch(() => toast('This background image could not be decoded.'));
     const s = bus.state.settings;
-    const geometry = JSON.stringify([s.background.mirror, s.background.mode, s.background.fit, s.paused]);
+    const geometry = JSON.stringify([s.background.mirror, s.background.mode, s.background.fit, s.inputMode, s.dominantHand]);
     if (geometry !== previousGeometry) { previousGeometry = geometry; releaseHand(); }
+    if (s.paused !== previousPaused) { previousPaused = s.paused; interactions.cancelActive(); input.endHand(); }
     video.style.transform = s.background.mirror ? 'scaleX(-1)' : '';
   }
   updateControls(bus);
+  saveHandSettings(bus.state.settings);
   const welcome = el('board-welcome');
   if (welcome) welcome.hidden = !!bus.state.history.position || !!bus.state.history.active || bus.state.settings.background.mode !== 'blank';
 };
@@ -136,13 +170,10 @@ camera.tracker.onResult = result => {
   const now = performance.now();
   lastTracking = now; inferenceMs = result.duration; trackingRate.tick(now);
   if (now - result.timestamp > 250 || document.hidden) { releaseHand(); return; }
-  hand = gestures.update(result.landmarks, { width: video.videoWidth, height: video.videoHeight }, result.timestamp, bus.state.settings);
-  camera.hand = !!hand;
+  interactions.update(result, { width: video.videoWidth, height: video.videoHeight }, result.timestamp, bus.state.settings);
+  hand = interactions.pointer; camera.hand = !!hand;
   el('hand-dot')?.classList.toggle('active', !!hand);
-  if (!hand) { input.endHand(); if (cursor.classList.contains('from-hand')) cursor.hidden = true; return; }
-  const s = bus.state.settings;
-  const point = cameraToCanvas(hand.smooth, { width: video.videoWidth, height: video.videoHeight }, BOARD, s.background.mirror, s.background.mode === 'camera' ? s.background.fit : 'stretch');
-  input.hand(point, hand.phase);
+  if (!hand && cursor.classList.contains('from-hand')) cursor.hidden = true;
 };
 input.onPointer = (client, held, fromHand) => {
   lastPointerTime = performance.now();
@@ -178,14 +209,27 @@ function render(now: number): void {
   const s = bus.state.settings;
   if (backgroundDirty || (s.background.mode === 'camera' && camera.camera.stream)) { background.draw(backgroundContext, s.background); backgroundDirty = false; }
   drawing.render(bus.state.history);
+  overlayContext.clearRect(0, 0, BOARD.width, BOARD.height);
+  drawInteractionOverlay(overlayContext, interactions.visuals, currentStrokes(bus.state.history, interactions.visuals.movePreview), bus.state.selection);
   if (hand && now - lastTracking > 250) releaseHand();
   if (now - lastPointerTime > 1800) cursor.hidden = true;
   const calibrating = el<HTMLDialogElement>('settings-dialog').open;
   const metrics = `Tracking ${trackingRate.get()} fps · Render ${renderRate.get()} fps · Inference ${inferenceMs.toFixed(1)} ms`;
   if (debug || calibrating) drawDebug(overlayContext, hand, { width: video.videoWidth || 1280, height: video.videoHeight || 720 }, s, metrics);
-  else overlayContext.clearRect(0, 0, BOARD.width, BOARD.height);
   if (now - lastMetrics > 200) {
     lastMetrics = now;
+    const interaction = interactions.diagnostics;
+    pipelineDebug.interactionText = [
+      `Dominant hand: ${interaction.dominantHand}; detected: ${interaction.detectedHands.join(', ') || 'none'}`,
+      `Gesture: ${interaction.instantaneousGesture}; stable: ${interaction.stableGesture}; enter: ${Math.round(interaction.gestureEnterMs)} ms`,
+      `Active interaction: ${interaction.interaction}; hand control: ${interaction.handControl}`,
+      `Two-hand close: ${interaction.twoHandClose}; hold: ${Math.round(interaction.twoHandHeldMs)} ms`,
+      `Lasso active: ${interaction.lassoActive}; selected strokes: ${interaction.selectedStrokeCount}; grabbed: ${interaction.grabbedStrokeId ?? 'none'}`,
+      `Plane calibration: ${interaction.planeCalibrationActive ? 'active' : interaction.planeCalibrationValid ? 'valid' : 'not calibrated'}`,
+      `Input mode: ${interaction.inputMode}; virtual nib: ${interaction.virtualNibPoint ? interaction.virtualNibPoint.x.toFixed(3) + ', ' + interaction.virtualNibPoint.y.toFixed(3) : 'none'}`,
+      `Raw pointer: ${interaction.rawPoint ? interaction.rawPoint.x.toFixed(3) + ', ' + interaction.rawPoint.y.toFixed(3) : 'none'}`,
+      `Mapped pointer: ${interaction.mappedPoint ? interaction.mappedPoint.x.toFixed(1) + ', ' + interaction.mappedPoint.y.toFixed(1) : 'none'}`,
+    ].join('\n');
     pipelineDebug.render(s);
     if (calibrating) el('calibration-readout').textContent = hand ? `Hand detected · ${hand.phase} · pinch ratio ${hand.ratio.toFixed(2)}\nRaw index ${hand.raw.x.toFixed(3)}, ${hand.raw.y.toFixed(3)} · Smoothed ${hand.smooth.x.toFixed(3)}, ${hand.smooth.y.toFixed(3)}\n${metrics}\nModel detection/presence/tracking thresholds: ${camera.tracker.diagnostics.worker.threshold}. Per-frame detection confidence is not exposed.` : (camera.remote ? 'Calibration must run in the camera-owning ' + camera.remote.view + ' window.' : 'No hand detected. Open your hand in front of the camera. Pinching starts only after an open hand is seen.');
     if (camera.active) el('tracking-status').textContent = s.paused ? 'Hand input paused · mouse still available' : hand ? 'Hand detected · ' + hand.phase.replace('pinch', 'pinch ') : 'Tracking ready · raise one open hand';

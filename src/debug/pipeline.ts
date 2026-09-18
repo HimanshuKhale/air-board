@@ -2,6 +2,8 @@ import type { CameraSession } from '../camera/session';
 import type { Settings } from '../core/types';
 import { cameraToCanvas } from '../core/coordinates';
 import type { PreviewMessage, TrackingResult } from '../tracking/protocol';
+import { handednessName, palmCenter } from '../interaction/pose';
+import { virtualNib } from '../interaction/stylus';
 const edges = [[0,1,2,3,4],[0,5,6,7,8],[5,9,10,11,12],[9,13,14,15,16],[13,17,18,19,20],[0,17]];
 /** Debug-only DOM/canvases. No board state, drawing pixels, persistence or network use. */
 export class PipelineDebug {
@@ -26,6 +28,7 @@ export class PipelineDebug {
   private snapshotFingerprint: number | null = null;
   private unchangedSince = 0;
   private lastTrack = { label: 'Unavailable', width: 0, height: 0, frameRate: 0 };
+  interactionText = '';
   constructor(private camera: CameraSession) {
     this.panel.id = 'pipeline-debug'; this.panel.className = 'panel'; this.panel.hidden = true;
     this.panel.innerHTML = `<h2>Camera → worker → MediaPipe</h2>
@@ -176,6 +179,7 @@ export class PipelineDebug {
       `Last successful inference: ${w.lastSuccessAt ? new Date(w.lastSuccessAt).toISOString() : 'never'}`,
       `Preview age: ${this.snapshotAt ? ((now - this.snapshotAt) / 1000).toFixed(1) + ' s' : 'no snapshot'}`,
       `Identical sampled pixels: ${this.unchangedSince ? ((now - this.unchangedSince) / 1000).toFixed(1) + ' s (may be a stationary scene)' : 'unavailable'}`,
+      this.interactionText,
     ].join('\n');
     const holder = this.landmarks.parentElement!;
     const width = Math.max(1, holder.clientWidth), height = Math.max(1, holder.clientHeight);
@@ -189,13 +193,24 @@ export class PipelineDebug {
     }
     if (!this.showLandmarks || !track || !this.result || now - this.resultAt > 500 || !video.videoWidth || !video.videoHeight) return;
     ctx.strokeStyle = '#18c8ed'; ctx.fillStyle = '#18c8ed'; ctx.lineWidth = 1.5;
-    for (const hand of this.result.allLandmarks) {
+    for (const [handIndex, hand] of this.result.allLandmarks.entries()) {
       if (hand.length !== 21) continue;
       const points = hand.map(p => cameraToCanvas(p, { width: video.videoWidth, height: video.videoHeight }, { width, height }, settings.background.mirror, 'cover'));
       for (const edge of edges) {
         ctx.beginPath(); edge.forEach((index, i) => { const p = points[index]; if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); }); ctx.stroke();
       }
       points.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill(); });
+      if (handednessName(this.result.stats.handedness[handIndex] ?? []) === settings.dominantHand) {
+        const palm = cameraToCanvas(palmCenter(hand), { width: video.videoWidth, height: video.videoHeight }, { width, height }, settings.background.mirror, 'cover');
+        ctx.fillStyle = '#ffb000'; ctx.beginPath(); ctx.arc(palm.x, palm.y, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(points[8].x, points[8].y, 4, 0, Math.PI * 2); ctx.fill();
+        const nib = virtualNib(hand, { width: video.videoWidth, height: video.videoHeight });
+        if (nib) {
+          const marker = cameraToCanvas(nib, { width: video.videoWidth, height: video.videoHeight }, { width, height }, settings.background.mirror, 'cover');
+          ctx.strokeStyle = '#ff4d9d'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(marker.x, marker.y, 7, 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.fillStyle = '#18c8ed'; ctx.strokeStyle = '#18c8ed';
+      }
     }
   }
 }

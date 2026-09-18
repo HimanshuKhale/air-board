@@ -119,6 +119,7 @@ describe('history and message validation', () => {
     expect(validCommand({ type: 'settings', patch: { __unknown: true } })).toBe(false);
     expect(validCommand({ type: 'settings', patch: { background: { ...defaults().background, image: 'https://example.org/image.png' } } })).toBe(false);
     expect(validCommand({ type: 'settings', patch: { pinchClose: 0.8 } })).toBe(false);
+    expect(validCommand({ type: 'settings', patch: { planePoints: [{x:0,y:0},{x:1,y:1},{x:1,y:0},{x:0,y:1}] } })).toBe(false);
     expect(validState({ settings: {}, history: initialState().history })).toBe(false);
   });
   it('ends a live stroke before a synchronized tool change', () => {

@@ -1,6 +1,6 @@
 import type { Point } from '../core/types';
 export const MODEL_OPTIONS = {
-  runningMode: 'VIDEO' as const, numHands: 1, delegate: 'CPU' as const,
+  runningMode: 'VIDEO' as const, numHands: 2, delegate: 'CPU' as const,
   minHandDetectionConfidence: 0.65, minHandPresenceConfidence: 0.65, minTrackingConfidence: 0.65,
 };
 export type Pipeline = 'canvas' | 'bitmap';

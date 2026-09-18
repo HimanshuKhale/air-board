@@ -1,4 +1,5 @@
 import { BOARD, type HistoryState, type Stroke } from '../core/types';
+import { currentStrokes, type MovePreview } from './history';
 export function paintStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
   if (!stroke.points.length) return;
   const { points, brush } = stroke;
@@ -27,6 +28,7 @@ export class DrawingEngine {
   private readonly cache: CanvasRenderingContext2D;
   private dirty = true;
   private historyDirty = true;
+  private movePreview: MovePreview | null = null;
   constructor(readonly canvas: HTMLCanvasElement) {
     canvas.width = this.committed.width = BOARD.width;
     canvas.height = this.committed.height = BOARD.height;
@@ -34,14 +36,18 @@ export class DrawingEngine {
     this.cache = this.committed.getContext('2d')!;
   }
   invalidate(committed = true): void { this.dirty = true; this.historyDirty ||= committed; }
+  setMovePreview(preview: MovePreview | null): void { this.movePreview = preview; this.dirty = true; }
   render(history: HistoryState): void {
     if (!this.dirty) return;
+    if (this.movePreview) {
+      this.context.clearRect(0, 0, BOARD.width, BOARD.height);
+      for (const stroke of currentStrokes(history, this.movePreview)) paintStroke(this.context, stroke);
+      this.dirty = false; return;
+    }
     if (this.historyDirty) {
       this.cache.clearRect(0, 0, BOARD.width, BOARD.height);
-      for (const action of history.actions.slice(0, history.position)) {
-        if (action.kind === 'clear') this.cache.clearRect(0, 0, BOARD.width, BOARD.height);
-        else paintStroke(this.cache, action.stroke);
-      }
+      const committed = { ...history, active: null };
+      for (const stroke of currentStrokes(committed)) paintStroke(this.cache, stroke);
     }
     // One transparent scratch composition per frame prevents highlighter opacity buildup.
     this.context.clearRect(0, 0, BOARD.width, BOARD.height);

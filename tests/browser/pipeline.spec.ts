@@ -82,7 +82,7 @@ test('local known-hand fixture detects 21 landmarks through the normalized worke
     return outcomes;
   }, fixture);
   console.log('Known-hand fixture comparison (not webcam validation):', outcomes);
-  expect(outcomes[0]).toMatchObject({ pipeline: 'canvas', hands: 1, points: 21, status: 'hands' });
+  expect(outcomes[0]).toMatchObject({ pipeline: 'canvas', hands: 2, points: 21, status: 'hands' });
   // Also exercise the complete MediaStream -> video -> capture -> worker -> raw landmark overlay path.
   await page.addInitScript(encoded => {
     Object.defineProperty(navigator.mediaDevices, 'getUserMedia', { value: async () => {
@@ -99,8 +99,8 @@ test('local known-hand fixture detects 21 landmarks through the normalized worke
   await page.locator('#worker-preview-toggle').check();
   await page.locator('#mediapipe-landmarks-toggle').check();
   await page.getByRole('button', { name: 'Start camera', exact: true }).click();
-  await expect(page.locator('#pipeline-readout')).toContainText('detected hand count: 1', { timeout: 35000 });
-  await expect(page.locator('#pipeline-readout')).toContainText('Points per hand: [21]');
+  await expect(page.locator('#pipeline-readout')).toContainText('detected hand count: 2', { timeout: 35000 });
+  await expect(page.locator('#pipeline-readout')).toContainText('Points per hand: [21, 21]');
   await expect.poll(() => page.locator('#camera-landmarks').evaluate(c => {
     const canvas = c as HTMLCanvasElement;
     return canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data.some((value, i) => i % 4 === 3 && value > 0);
@@ -143,4 +143,27 @@ test('debug panel shows actual portrait capture and throttled worker preview; di
   await page.locator('#debug-toggle').check();
   await expect(page.locator('#pipeline-threshold')).toHaveValue('0.65');
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
+});
+
+test('writing-plane calibration preferences survive reload and can be reset', async ({ page }) => {
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('airboard-settings-seeded')) return;
+    sessionStorage.setItem('airboard-settings-seeded', '1');
+    localStorage.setItem('saai-airboard-hand-settings-v1', JSON.stringify({
+      dominantHand: 'Left', gestureSensitivity: 'gentle', openPalmHoldMs: 220, palmEraserSize: 80, lassoCloseRadius: 60,
+      inputMode: 'stylus', stylusOffset: {x:.05,y:-.03}, fistGrabRadius: 75, twoHandHoldMs: 550, twoHandProximity: .2,
+      planePoints: [{x:.1,y:.1},{x:.9,y:.15},{x:.8,y:.9},{x:.2,y:.8}],
+    }));
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Calibration & settings', exact: true }).click();
+  await expect(page.locator('[data-setting="dominantHand"]')).toHaveValue('Left');
+  await expect(page.locator('[data-setting="inputMode"]')).toHaveValue('stylus');
+  await expect(page.locator('[data-stylus-status]')).toContainText('Offset calibrated');
+  await expect(page.locator('[data-plane-status]')).toContainText('Calibrated');
+  await page.getByRole('button', { name: 'Reset plane', exact: true }).click();
+  await expect(page.locator('[data-plane-status]')).toContainText('Not calibrated');
+  await page.reload();
+  await page.getByRole('button', { name: 'Calibration & settings', exact: true }).click();
+  await expect(page.locator('[data-plane-status]')).toContainText('Not calibrated');
 });
