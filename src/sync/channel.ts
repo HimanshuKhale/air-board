@@ -95,6 +95,10 @@ export class BoardChannel {
       this.state.settings.confirmationHoldMs ??= 400;
       this.state.settings.shapeEditMode ??= 'scale';
       this.state.settings.shapeResizeMode ??= 'proportional';
+      this.state.settings.penGripHoldMs ??= 180;
+      this.state.settings.recognitionMode ??= 'shapes';
+      this.state.settings.lassoGesture ??= 'four-fingertip';
+      this.state.settings.lassoHoldMs ??= 220;
       this.applied = new Set(m.applied as string[]);
       for (const id of this.applied) this.unacknowledged.delete(id);
       this.ready = true; this.onChange(); this.flush();

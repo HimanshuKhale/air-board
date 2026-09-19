@@ -86,7 +86,9 @@ test('Studio and Presentation synchronize late join, commands, and leader failov
   await present.getByRole('button', { name: 'Eraser', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Eraser', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await present.getByRole('button', { name: 'Undo', exact: true }).click();
+  await present.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect.poll(() => alpha(page)).toBe(0);
+  await present.getByRole('button', { name: 'Redo', exact: true }).click();
   await present.getByRole('button', { name: 'Redo', exact: true }).click();
   await expect.poll(() => alpha(page)).toBe(255);
   await page.close();

@@ -20,20 +20,17 @@ Record laptop/CPU, Windows version, Chrome/Edge version, webcam, lighting, date,
 - [ ] Stop Camera turns off the device light. Unplugging the camera produces a useful status and stops drawing.
 
 ## Pinch, safety and handwriting
-- [ ] Hover with an open hand: no marks.
-- [ ] Bring thumb/index together for a deliberate pinch: the pointer engages.
-- [ ] Pinch and move with Pen: continuous rounded strokes, including slow letters and fast curves.
-- [ ] Release: drawing stops immediately.
-- [ ] Vary distance to camera; normalize-based pinch remains usable. Adjust optional calibration if needed.
-- [ ] Wiggle around the closed threshold; it does not rapidly toggle.
-- [ ] Lose hand visibility mid-stroke: drawing stops. Re-enter already pinched: no drawing. Open, then pinch: a new stroke starts without a connecting line.
-- [ ] Move rapidly or show a second hand: check that unexpected hand switches do not create long lines. Use one hand for reliable MVP operation.
+- [ ] Open Debug, raise only the physical right hand, and use **Verify physical Right**. Confirm Debug shows `raw Right -> physical Right`, a confidence score, writing role Right and confirmation role Left. Repeat with **Verify physical Left**. Toggle preview Mirror off/on and confirm these roles never swap.
+- [ ] In Finger mode, hover with an open physical right hand: no marks. Pinch and move: continuous rounded strokes. Release stops immediately. The physical left hand never draws, erases, lassos, drags or resizes.
+- [ ] In Pen Writing, hold an ordinary pen naturally. Release the grip once, then hold the thumb/index/middle three-point grip for the configured interval. Confirm the indicator changes from `P↑`/UP to `P`/DOWN and ink follows the estimated virtual nib without an ordinary pinch.
+- [ ] Release the Pen Writing grip to lift/reposition with no connecting line. Lose tracking mid-stroke and return still gripping: no ink starts until a release and fresh stable grip. Switch modes mid-stroke and confirm the same rearming rule.
+- [ ] Vary distance and orientation. Confirm the pen grip is distinct from the five-tip lasso cluster. Record false starts/missed releases; the physical pen tip and surface contact are not detected.
 - [ ] Pause hand input (Space or button): gestures stop, while mouse/touch remain usable.
 - [ ] Hold the dominant hand open for about 200 ms: the palm-centered eraser appears at its real diameter and erases continuously until the pose changes.
-- [ ] Extend only the dominant index finger, trace a sufficiently large closed loop, and confirm enclosed strokes show selection bounds. Tiny/open loops do not select.
+- [ ] Bring the physical right index, middle, ring and pinky fingertips to the thumb and hold for the configured interval. Trace a sufficiently large closed loop with the five-tip centroid and confirm enclosed strokes and native objects show selection bounds. Relax slightly to check hysteresis; open fully to release. A pen grip must not start lasso. If the camera cannot resolve the cluster reliably, select the documented Index-only fallback and record that result.
 - [ ] Form a fist near the selection, drag, and release. Undo moves it back in one step; redo reapplies it. With no selection, only the nearest strand inside the grab radius moves.
 - [ ] Start lasso/erase/drag, then hide the hand. The action stops or cancels and does not bridge when the hand returns.
-- [ ] Bring two palm centers close for about 500 ms. Confirm a pause toast, no hand drawing/erase/lasso/grab, and working mouse/touch. Separate and rejoin after cooldown to resume without continuing an old action.
+- [ ] Bring two palm centers close for about 500 ms while idle. Confirm a pause toast, no hand drawing/erase/lasso/grab, and working mouse/touch. Confirm an active shape transform or left-hand confirmation has priority. Separate and rejoin after cooldown to resume without continuing an old action.
 - [ ] Change focus, minimize, or switch tabs mid-stroke: no lingering press when you return.
 
 ## Controls and tools
@@ -70,8 +67,8 @@ Record laptop/CPU, Windows version, Chrome/Edge version, webcam, lighting, date,
 ## Calibration and performance
 - [ ] Calibrate the writing plane in Top Left, Top Right, Bottom Right, Bottom Left order using a visibly skewed physical quadrilateral. Check corners and interior points map to the rectangular board; reload and confirm persistence.
 - [ ] Try duplicate, crossed, tiny, or concave corner placement and confirm calibration is rejected; reset and recalibrate.
-- [ ] Choose Stylus Assist, hold a pen naturally, align its physical tip to the center target and pinch. Verify virtual nib/ink alignment, persistence after reload, and reset. The pen itself is not detected.
-- [ ] In Debug, compare camera preview with Worker Input Preview. Verify dimensions, nonuniform opaque RGB pixels, advancing frame IDs, successful inference timestamps, handedness, gesture state, lasso/selection/grab state, plane state and virtual nib.
+- [ ] Choose Pen Writing, align the intended virtual nib point to the center target, release once, then hold the three-point grip. Verify estimated nib/ink alignment, persistence after reload, and reset. The pen itself and physical contact are not detected.
+- [ ] In Debug, compare camera preview with Worker Input Preview. Verify dimensions, nonuniform opaque RGB pixels, advancing frame IDs, successful inference timestamps, raw-to-physical handedness, handedness score, writing/confirmation roles, per-hand gesture, lasso/selection/grab state, plane state, pen UP/DOWN and virtual nib.
 - [ ] Calibration shows detected hand, raw/smoothed coordinates, pinch phase/ratio and thresholds.
 - [ ] Smoothing adjusts response; defaults restore sensible behavior.
 - [ ] On the target laptop, record tracking FPS, render FPS and inference duration. Check handwriting lag during a 10-minute teaching simulation.
@@ -82,7 +79,7 @@ Record laptop/CPU, Windows version, Chrome/Edge version, webcam, lighting, date,
 ## Intelligence V1: real microphone and webcam acceptance
 
 - [ ] With the AI service stopped, draw, pinch, erase, undo and export normally. Typed commands in Commands mode still work.
-- [ ] Draw a large rough rectangle and circle with mouse, touch and pinch separately. Check the clean preview, Convert, Keep ink, and Undo restoring the rough stroke. Try handwriting O, A, D and small notes; keep ambiguous marks as ink.
+- [ ] In Shapes mode, draw a large rough rectangle and circle with mouse, touch and Finger/Pen Writing separately. Confirm confident candidates convert immediately with no prompt; one Undo restores rough ink and Redo restores the native shape. Try handwriting O, A, D and small notes; uncertain marks remain ink.
 - [ ] Select a converted shape by lasso and by Shift-click; move it by fist and Shift-drag. Erase it with open palm and mouse eraser; one Undo restores the shape. Confirm freehand erasing still reveals a changed background.
 - [ ] Start `npm.cmd run ai` with a real server-side key, then choose Commands and click Start microphone. Deny permission once and confirm a useful error. Retry and confirm only the microphone indicator turns on; camera ownership is unchanged.
 - [ ] Say English, Hindi and Hinglish phrases, including “AirBoard, ek rectangle banao”, “AirBoard, teen boxes banao”, “AirBoard, create a flowchart with data collection, model training and deployment”, and Hindi with English technical terms. Check transcript fidelity and that interim text never creates objects.
@@ -93,12 +90,11 @@ Record laptop/CPU, Windows version, Chrome/Edge version, webcam, lighting, date,
 - [ ] Save board and transparent PNGs containing native shapes and labels. Verify Presentation output and your actual screen-sharing setup.
 - [ ] Review provider usage and spending limit after a live trial. Automatic mode should remain unavailable in the UI.
 
-## Gesture approval and advanced shape editing
+## Smart recognition and advanced shape editing
 
-- [ ] Draw a recognized shape. Confirm the approval window lasts 8 seconds, shows a live countdown, and mouse/touch YES and NO work.
-- [ ] During the prompt, hold an anatomical left-hand V sign for the configured 300–500 ms. Confirm conversion fires once. Keep holding through the next prompt and confirm it does not fire until the hand returns to neutral.
-- [ ] Hold a left-hand shaka during a prompt. Confirm the rough stroke remains. Try ambiguous poses, low handedness confidence, tracking loss, focus loss, timeout, and fast alternating gestures; no stale request may settle.
-- [ ] Bring both hands together during a prompt. Confirm the left-hand answer remains available and pause/resume does not toggle. Confirm normal two-hand pause returns after the prompt closes.
+- [ ] In Digits mode, write 0 through 9 in several natural styles. Confirm confident results become editable native text in the selected color and at approximately the written position/size. Test two-stroke 4 and 5 within and outside the 450 ms grouping window; unrelated nearby strokes must not merge.
+- [ ] In Mixed mode, test 0/circle, 1/line, 4/triangle, 6/9 and 3/8. Confirm the first three explicit collisions and other low-margin candidates remain ink rather than guessing.
+- [ ] Trigger a separate pending confirmation if one is available. Only then, hold a physical-left V for YES or shaka for NO for the configured 300–500 ms. Confirm the pose must rearm and the right hand remains available for board manipulation. Both-hands pause must not steal the pending confirmation.
 - [ ] Create each palette shape: triangle, square, rectangle, parallelogram, trapezoid, pentagon, hexagon, arbitrary polygon, circle, ellipse, line and arrow. Confirm Studio/Presentation synchronization and PNG export.
 - [ ] Select one shape. Drag Scale handles with mouse/touch and right-hand pinch in Proportional and Free modes. Confirm live preview, board/minimum bounds, one Undo per completed transform, and cancellation on tracking loss.
 - [ ] In Points mode, move polygon vertices and edge handles. Confirm invalid self-intersections are rejected. Move line/arrow endpoints and circle/ellipse radius handles.

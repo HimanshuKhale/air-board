@@ -60,6 +60,11 @@ export function replaceStroke(history: HistoryState, strokeId: string, object: B
   if (!scene.strokes.some(item => item.id === strokeId && item.brush.tool !== 'eraser') || scene.objects.some(item => item.id === object.id)) return false;
   commit(history, { kind: 'replace', strokeId, object }); return true;
 }
+export function replaceStrokes(history: HistoryState, strokeIds: string[], object: BoardObject): boolean {
+  const unique = [...new Set(strokeIds)], scene = currentScene(history);
+  if (!unique.length || unique.some(id => !scene.strokes.some(item => item.id === id && item.brush.tool !== 'eraser')) || scene.objects.some(item => item.id === object.id)) return false;
+  commit(history, { kind: 'replace-many', strokeIds: unique, object }); return true;
+}
 export function createDiagram(history: HistoryState, objects: BoardObject[]): boolean {
   const ids = new Set(currentScene(history).objects.map(item => item.id));
   if (!objects.length || objects.some(item => ids.has(item.id) || (ids.add(item.id), false))) return false;
@@ -84,6 +89,7 @@ export function currentScene(history: HistoryState, preview: MovePreview | null 
       case 'update': objects = objects.map(object => object.id === action.object.id ? { ...action.object } : object); break;
       case 'delete': objects = objects.filter(object => object.id !== action.id); break;
       case 'replace': strokes = strokes.filter(stroke => stroke.id !== action.strokeId); objects.push({ ...action.object }); break;
+      case 'replace-many': strokes = strokes.filter(stroke => !action.strokeIds.includes(stroke.id)); objects.push({ ...action.object }); break;
       case 'diagram': objects.push(...action.objects.map(object => ({ ...object }))); break;
     }
   }

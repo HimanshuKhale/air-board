@@ -10,12 +10,12 @@ export function studio(): string {
     <section class="workspace">
       <div class="workspace-heading"><div><p class="eyebrow">YOUR TEACHING SPACE</p><h1>A little space for big ideas.</h1></div><span class="board-label">16:9 board <span>·</span> 1600 × 900</span></div>
       <div class="board-shell"><div class="board" id="board">
-        <canvas id="background" aria-hidden="true"></canvas><canvas id="drawing" aria-label="Teaching whiteboard. Draw with a mouse, touch, or pinch."></canvas><canvas id="overlay" aria-hidden="true"></canvas>
-        <div class="board-welcome" id="board-welcome"><span class="welcome-icon">${icon('pen')}</span><h2>Your next idea starts here.</h2><p>Pick up a pen. Or just raise your hand.</p><span>PINCH TO DRAW <b>·</b> RELEASE TO MOVE</span></div>
+        <canvas id="background" aria-hidden="true"></canvas><canvas id="drawing" aria-label="Teaching whiteboard. Draw with a mouse, touch, finger pinch, or Pen Writing grip."></canvas><canvas id="overlay" aria-hidden="true"></canvas>
+        <div class="board-welcome" id="board-welcome"><span class="welcome-icon">${icon('pen')}</span><h2>Your next idea starts here.</h2><p>Use Finger mode, or choose Pen Writing for a physical pen grip.</p><span>FINGER PINCH OR PEN GRIP <b>·</b> RELEASE TO MOVE</span></div>
       </div>
       <div class="toolbar studio-toolbar" id="toolbar" aria-label="Drawing tools">${toolbar()}${button('export', 'Save', 'save', 'class="gesture-extra"')}${button('settings', 'Settings', 'settings', 'class="gesture-extra"')}${button('background', 'Background', 'board', 'class="gesture-extra"')}</div></div>
       <div class="board-footer"><span id="input-hint">Mouse & touch ready. Start the camera for hand control.</span><div>${button('export', 'Save PNG', 'save')}${button('export-transparent', 'Drawing only', 'save')}</div></div>
-      <div class="quick-guide"><div><span>01</span><p><b>Set your scene</b>Choose a board, image, or camera.</p></div><div><span>02</span><p><b>Make your point</b>Move to hover. Pinch to draw.</p></div><div><span>03</span><p><b>Share your ideas</b>Open Presentation and share that window.</p></div></div>
+      <div class="quick-guide"><div><span>01</span><p><b>Set your scene</b>Choose a board, image, or camera.</p></div><div><span>02</span><p><b>Make your point</b>Pinch in Finger mode, or hold the Pen Writing grip.</p></div><div><span>03</span><p><b>Share your ideas</b>Open Presentation and share that window.</p></div></div>
     </section>
     <aside class="sidebar">
       <section class="panel camera-panel"><div class="panel-heading"><h2>${icon('camera')} Camera & hand control</h2><span class="status-dot" id="camera-dot"></span></div>

@@ -1,5 +1,5 @@
 import type { BoardObject, BoardState, Brush, Point, Settings } from '../core/types';
-import { appendPoint, beginStroke, clear, createDiagram, createObject, deleteObject, finishStroke, moveStrokes, redo, replaceStroke, undo, updateObject } from '../drawing/history';
+import { appendPoint, beginStroke, clear, createDiagram, createObject, deleteObject, finishStroke, moveStrokes, redo, replaceStroke, replaceStrokes, undo, updateObject } from '../drawing/history';
 import { homographyFromQuad } from '../calibration/homography';
 import { validPolygon, vertexBounds } from '../drawing/geometry';
 export type Command =
@@ -13,6 +13,7 @@ export type Command =
   | { type: 'update-object'; object: BoardObject }
   | { type: 'delete-object'; id: string }
   | { type: 'replace-stroke'; strokeId: string; object: BoardObject }
+  | { type: 'replace-strokes'; strokeIds: string[]; object: BoardObject }
   | { type: 'create-diagram'; objects: BoardObject[]; requestId: string; baseRevision: number }
   | { type: 'undo' | 'redo' | 'clear' };
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -57,8 +58,9 @@ export function validSettingsPatch(v: unknown): v is Partial<Settings> {
       case 'debounceMs': return range(value, 30, 200);
       case 'dominantHand': return value === 'Left' || value === 'Right';
       case 'gestureSensitivity': return value === 'gentle' || value === 'balanced' || value === 'responsive';
-      case 'inputMode': return value === 'finger' || value === 'stylus';
+      case 'inputMode': return value === 'finger' || value === 'pen';
       case 'stylusOffset': return object(value) && range(value.x, -1, 1) && range(value.y, -1, 1);
+      case 'penGripHoldMs': return range(value, 120, 400);
       case 'openPalmHoldMs': return range(value, 150, 250);
       case 'palmEraserSize': return range(value, 30, 160);
       case 'planePoints': return planePoints(value);
@@ -68,6 +70,9 @@ export function validSettingsPatch(v: unknown): v is Partial<Settings> {
       case 'twoHandProximity': return range(value, 0.08, 0.5);
       case 'paused': case 'autoHide': return typeof value === 'boolean';
       case 'smartShapes': case 'autoConvertShapes': return typeof value === 'boolean';
+      case 'recognitionMode': return value === 'shapes' || value === 'digits' || value === 'mixed';
+      case 'lassoGesture': return value === 'four-fingertip' || value === 'index-only';
+      case 'lassoHoldMs': return range(value, 150, 400);
       case 'confirmationHoldMs': return range(value, 300, 500);
       case 'shapeEditMode': return value === 'scale' || value === 'points';
       case 'shapeResizeMode': return value === 'proportional' || value === 'free';
@@ -87,18 +92,19 @@ export function validCommand(v: unknown): v is Command {
     case 'create-object': case 'update-object': return validBoardObject(v.object);
     case 'delete-object': return id(v.id);
     case 'replace-stroke': return id(v.strokeId) && validBoardObject(v.object);
+    case 'replace-strokes': return Array.isArray(v.strokeIds) && v.strokeIds.length > 0 && v.strokeIds.length <= 4 && v.strokeIds.every(id) && new Set(v.strokeIds).size === v.strokeIds.length && validBoardObject(v.object);
     case 'create-diagram': return id(v.requestId) && Number.isInteger(v.baseRevision) && range(v.baseRevision, 0, Number.MAX_SAFE_INTEGER) && Array.isArray(v.objects) && v.objects.length > 0 && v.objects.length <= 100 && v.objects.every(validBoardObject) && new Set(v.objects.map(o => (o as BoardObject).id)).size === v.objects.length;
     case 'undo': case 'redo': case 'clear': return true;
     default: return false;
   }
 }
 export function validState(v: unknown): v is BoardState {
-  const requiredSettings = ['brush', 'background', 'smoothing', 'pinchClose', 'pinchOpen', 'debounceMs', 'paused', 'autoHide', 'dominantHand', 'gestureSensitivity', 'inputMode', 'stylusOffset', 'openPalmHoldMs', 'palmEraserSize', 'planePoints', 'lassoCloseRadius', 'fistGrabRadius', 'twoHandHoldMs', 'twoHandProximity'];
+  const requiredSettings = ['brush', 'background', 'smoothing', 'pinchClose', 'pinchOpen', 'debounceMs', 'paused', 'autoHide', 'dominantHand', 'gestureSensitivity', 'inputMode', 'stylusOffset', 'penGripHoldMs', 'openPalmHoldMs', 'palmEraserSize', 'planePoints', 'lassoCloseRadius', 'lassoGesture', 'lassoHoldMs', 'fistGrabRadius', 'twoHandHoldMs', 'twoHandProximity', 'smartShapes', 'recognitionMode'];
   if (!object(v) || !object(v.settings) || !validSettingsPatch(v.settings) || !requiredSettings.every(key => Object.hasOwn(v.settings as object, key)) || !object(v.history) || !Array.isArray(v.selection) || !v.selection.every(id)) return false;
   const h = v.history;
   const stroke = (s: unknown) => object(s) && id(s.id) && validBrush(s.brush) && Array.isArray(s.points) && s.points.length > 0 && s.points.length <= 12000 && s.points.every(point);
   return Array.isArray(h.actions) && h.actions.every(a => object(a) && (a.kind === 'clear' || (a.kind === 'stroke' && stroke(a.stroke)) || (a.kind === 'move' && Array.isArray(a.ids) && a.ids.length > 0 && a.ids.every(id) && range(a.dx, -3200, 3200) && range(a.dy, -1800, 1800)) ||
-    ((a.kind === 'create' || a.kind === 'update') && validBoardObject(a.object)) || (a.kind === 'delete' && id(a.id)) || (a.kind === 'replace' && id(a.strokeId) && validBoardObject(a.object)) || (a.kind === 'diagram' && Array.isArray(a.objects) && a.objects.length <= 100 && a.objects.every(validBoardObject)))) &&
+    ((a.kind === 'create' || a.kind === 'update') && validBoardObject(a.object)) || (a.kind === 'delete' && id(a.id)) || (a.kind === 'replace' && id(a.strokeId) && validBoardObject(a.object)) || (a.kind === 'replace-many' && Array.isArray(a.strokeIds) && a.strokeIds.length > 0 && a.strokeIds.length <= 4 && a.strokeIds.every(id) && validBoardObject(a.object)) || (a.kind === 'diagram' && Array.isArray(a.objects) && a.objects.length <= 100 && a.objects.every(validBoardObject)))) &&
     Number.isInteger(h.position) && range(h.position, 0, h.actions.length) && (h.active === null || stroke(h.active));
 }
 export function reduce(state: BoardState, command: Command): void {
@@ -116,6 +122,7 @@ export function reduce(state: BoardState, command: Command): void {
     case 'update-object': updateObject(state.history, command.object); break;
     case 'delete-object': deleteObject(state.history, command.id); state.selection = state.selection.filter(id => id !== command.id); break;
     case 'replace-stroke': replaceStroke(state.history, command.strokeId, command.object); state.selection = state.selection.map(id => id === command.strokeId ? command.object.id : id); break;
+    case 'replace-strokes': replaceStrokes(state.history, command.strokeIds, command.object); state.selection = [...new Set(state.selection.map(id => command.strokeIds.includes(id) ? command.object.id : id))]; break;
     case 'create-diagram': createDiagram(state.history, command.objects); break;
     case 'undo': undo(state.history); state.selection = []; break;
     case 'redo': redo(state.history); state.selection = []; break;

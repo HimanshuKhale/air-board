@@ -7,10 +7,8 @@ async function drawRectangle(page: Page): Promise<void> {
   for (const [x, y] of [[500, 200], [500, 400], [200, 400], [200, 200]]) await page.mouse.move(at(x, y).x, at(x, y).y, { steps: 15 });
   await page.mouse.up();
 }
-test('rough rectangle converts, moves, erases, undoes, and exports as PNG', async ({ page }) => {
+test('rough rectangle converts instantly, moves, erases, undoes, and exports as PNG', async ({ page }) => {
   await ready(page); await drawRectangle(page);
-  await expect(page.locator('#shape-suggestion')).toBeVisible();
-  await page.locator('#shape-convert').click();
   await expect(page.locator('#shape-suggestion')).toBeHidden();
   expect(await pixel(page, 200, 300)).toBeGreaterThan(0);
   const box = (await page.locator('#drawing').boundingBox())!, at = (x: number, y: number) => ({ x: box.x + box.width * x / 1600, y: box.y + box.height * y / 900 });
@@ -33,14 +31,13 @@ test('rough rectangle converts, moves, erases, undoes, and exports as PNG', asyn
   }, Buffer.concat(chunks).toString('base64'));
   expect(exportedAlpha).toBeGreaterThan(0);
 });
-test('rough circle converts to an editable ellipse and undo restores ink', async ({ page }) => {
+test('rough circle converts instantly to an editable ellipse and undo restores ink', async ({ page }) => {
   await ready(page);
   const box = (await page.locator('#drawing').boundingBox())!, at = (x: number, y: number) => ({ x: box.x + box.width * x / 1600, y: box.y + box.height * y / 900 });
   const start = at(820, 450); await page.mouse.move(start.x, start.y); await page.mouse.down();
   for (let i = 1; i <= 64; i++) { const p = at(700 + 120 * Math.cos(i * Math.PI / 32), 450 + 90 * Math.sin(i * Math.PI / 32)); await page.mouse.move(p.x, p.y); }
   await page.mouse.up();
-  await expect(page.locator('#shape-suggestion-label')).toContainText('ellipse');
-  await page.locator('#shape-convert').click();
+  await expect(page.locator('#shape-suggestion')).toBeHidden();
   await expect.poll(() => pixel(page, 820, 450)).toBeGreaterThan(0);
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect.poll(() => pixel(page, 820, 450)).toBeGreaterThan(0);
@@ -64,6 +61,17 @@ test('shape palette free-resizes with a live handle and commits one undo action'
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect.poll(alpha).toBe(before);
 });
+test('Digits mode replaces a confident handwritten 2 immediately and undo restores its ink', async ({ page }) => {
+  await ready(page); await page.getByRole('button', { name: 'Calibration & settings', exact: true }).click();
+  await page.locator('[data-setting="recognitionMode"]').selectOption('digits'); await page.getByRole('button', { name: 'Done', exact: true }).click();
+  const box = (await page.locator('#drawing').boundingBox())!, at = (x: number, y: number) => ({ x: box.x + box.width * x / 1600, y: box.y + box.height * y / 900 });
+  const vertices = [[280,230],[330,190],[430,200],[455,255],[410,315],[270,430],[465,430]];
+  const start = at(vertices[0][0], vertices[0][1]); await page.mouse.move(start.x, start.y); await page.mouse.down();
+  for (const [x,y] of vertices.slice(1)) { const p=at(x,y); await page.mouse.move(p.x,p.y,{steps:10}); } await page.mouse.up();
+  const alpha = () => page.locator('#drawing').evaluate(canvas => { const data=(canvas as HTMLCanvasElement).getContext('2d')!.getImageData(180,140,380,360).data; let total=0; for(let i=3;i<data.length;i+=4) total+=data[i]; return total; });
+  const clean = await alpha(); await page.getByRole('button', { name: 'Undo', exact: true }).click(); const rough = await alpha();
+  expect(rough).not.toBe(clean); await page.getByRole('button', { name: 'Redo', exact: true }).click(); await expect.poll(alpha).toBe(clean);
+});
 test('Hinglish commands create an atomic synchronized diagram and avoid duplicates', async ({ page, context }) => {
   await ready(page); await page.getByRole('button', { name: 'Voice', exact: true }).click();
   await page.locator('#ai-mode').selectOption('commands');
@@ -81,8 +89,19 @@ test('Hinglish commands create an atomic synchronized diagram and avoid duplicat
   await present.locator('#send-command').click(); await expect(present.locator('#ai-status')).toContainText('Created 1 rectangle');
   await expect.poll(() => pixel(present, 60, 100)).toBeGreaterThan(0);
 });
+test('destructive voice clear uses the separate pending confirmation while smart recognition stays instant', async ({ page }) => {
+  await ready(page); await drawRectangle(page);
+  expect(await pixel(page, 200, 300)).toBeGreaterThan(0);
+  await page.getByRole('button', { name: 'Voice', exact: true }).click(); await page.locator('#ai-mode').selectOption('commands');
+  await page.locator('#typed-command').fill('AirBoard, clear board'); await page.locator('#send-command').click();
+  await expect(page.locator('#shape-suggestion')).toBeVisible(); await expect(page.locator('#shape-suggestion-label')).toContainText('Clear the entire board');
+  await page.locator('#shape-keep').click(); await expect(page.locator('#shape-suggestion')).toBeHidden(); expect(await pixel(page, 200, 300)).toBeGreaterThan(0);
+  await page.locator('#typed-command').fill('AirBoard, clear'); await page.locator('#send-command').click();
+  await page.locator('#shape-convert').click(); await expect(page.locator('#ai-status')).toContainText('Board cleared');
+  await expect.poll(() => pixel(page, 200, 300)).toBe(0);
+});
 test('speech service failure leaves existing board usable', async ({ page }) => {
-  await ready(page); await drawRectangle(page); await page.locator('#shape-keep').click();
+  await ready(page); await drawRectangle(page); await expect(page.locator('#shape-suggestion')).toBeHidden();
   await page.route('http://127.0.0.1:8787/api/health', route => route.abort());
   await page.getByRole('button', { name: 'Voice', exact: true }).click(); await page.locator('#ai-mode').selectOption('commands');
   await page.locator('#mic-toggle').click(); await expect(page.locator('#ai-status')).toContainText('Failed to fetch');

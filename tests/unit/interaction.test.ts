@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyPose, palmCenter } from '../../src/interaction/pose';
+import { classifyFourFingertipPinch, classifyPenGrip, classifyPose, palmCenter } from '../../src/interaction/pose';
 import { PoseStabilizer } from '../../src/interaction/temporal';
 import { InteractionController } from '../../src/interaction/controller';
 import { defaults, initialState } from '../../src/core/settings';
@@ -27,15 +27,23 @@ function pose(kind: 'open' | 'index' | 'fist' | 'ambiguous'): Point[] {
   });
   return p;
 }
+function clustered(): Point[] {
+  const p = pose('fist'), center = { x: .5, y: .34 };
+  [4, 8, 12, 16, 20].forEach((index, i) => { p[index] = { x: center.x + (i - 2) * .006, y: center.y + Math.abs(i - 2) * .003 }; });
+  return p;
+}
+function penGrip(): Point[] {
+  const p = pose('fist'); p[4] = { ...p[8] }; p[12] = { x: p[8].x + .01, y: p[8].y + .01 }; return p;
+}
 const result = (points: Point[], name: 'Left' | 'Right' = 'Right'): TrackingResult => ({
   kind: 'result', frameId: 1, status: 'hands', landmarks: points, allLandmarks: [points], duration: 1, timestamp: 1,
   stats: { framesReceived: 1, inferenceCalls: 1, successfulInferences: 1, failedFrames: 0, frameId: 1, inputWidth: 1000, inputHeight: 1000,
-    duration: 1, landmarksArrayCount: 1, detectedHandCount: 1, landmarkCounts: [21], handedness: [[{ categoryName: name === 'Right' ? 'Left' : 'Right', score: 0.99 }]], lastSuccessAt: 1, lastError: null, threshold: 0.65 },
+    duration: 1, landmarksArrayCount: 1, detectedHandCount: 1, landmarkCounts: [21], handedness: [[{ categoryName: name, score: 0.99 }]], lastSuccessAt: 1, lastError: null, threshold: 0.65 },
 });
 const result2 = (right: Point[], left: Point[]): TrackingResult => {
   const value = result(right);
   value.allLandmarks = [right, left]; value.stats.detectedHandCount = 2; value.stats.landmarksArrayCount = 2; value.stats.landmarkCounts = [21, 21];
-  value.stats.handedness = [[{categoryName:'Left',score:.99}],[{categoryName:'Right',score:.98}]];
+  value.stats.handedness = [[{categoryName:'Right',score:.99}],[{categoryName:'Left',score:.98}]];
   return value;
 };
 
@@ -47,6 +55,12 @@ describe('geometric pose classification', () => {
   it('keeps pinch separate and authoritative', () => {
     const p = pose('open'); p[4] = { ...p[8] };
     expect(classifyPose(p, size).gesture).toBe('pinch');
+  });
+  it('distinguishes a five-tip lasso cluster from a three-point writing grip', () => {
+    expect(classifyFourFingertipPinch(clustered(), size).active).toBe(true);
+    expect(classifyPenGrip(clustered(), size).active).toBe(false);
+    expect(classifyPenGrip(penGrip(), size).active).toBe(true);
+    expect(classifyFourFingertipPinch(penGrip(), size).active).toBe(false);
   });
 });
 
@@ -62,6 +76,13 @@ describe('temporal pose state', () => {
 });
 
 describe('central interaction priority and open-palm erase', () => {
+  it('never routes the physical left hand into board writing', () => {
+    const state = initialState(), routed: string[] = [];
+    const controller = new InteractionController({ send: c => reduce(state, c), routePinch(_p, phase) { routed.push(phase); }, endPinch() {}, map: p => ({ x: p.x * 1600, y: p.y * 900 }), showPointer() {}, getState: () => state, toast() {} });
+    controller.update(result(pose('open'), 'Left'), size, 0, state.settings);
+    controller.update(result(pose('open'), 'Left'), size, 300, state.settings);
+    expect(routed).toEqual([]); expect(state.history.active).toBeNull();
+  });
   it('ignores the opposite hand and commits one eraser stroke after the stable hold', () => {
     const state = initialState(), commands: Command[] = [], routed: string[] = [];
     const controller = new InteractionController({
@@ -92,11 +113,32 @@ describe('central interaction priority and open-palm erase', () => {
   it('cancels an unfinished lasso on tracking loss', () => {
     const state = initialState();
     const controller = new InteractionController({ send: c => reduce(state, c), routePinch() {}, endPinch() {}, map: p => ({ x: p.x * 1600, y: p.y * 900 }), showPointer() {}, getState: () => state, toast() {} });
-    controller.update(result(pose('index')), size, 0, defaults());
-    controller.update(result(pose('index')), size, 200, defaults());
+    state.settings.lassoGesture = 'index-only';
+    controller.update(result(pose('index')), size, 0, state.settings);
+    controller.update(result(pose('index')), size, 250, state.settings);
     expect(controller.visuals.lasso.length).toBe(1);
     controller.reset();
     expect(controller.visuals.lasso).toEqual([]);
+    expect(controller.diagnostics.lassoActive).toBe(false);
+  });
+  it('starts lasso only after a stable four-fingertip cluster', () => {
+    const state = initialState(), routed: string[] = [];
+    const controller = new InteractionController({ send: c => reduce(state, c), routePinch(_p, phase) { routed.push(phase); }, endPinch() {}, map: p => ({ x: p.x * 1600, y: p.y * 900 }), showPointer() {}, getState: () => state, toast() {} });
+    controller.update(result(clustered()), size, 0, state.settings); expect(controller.visuals.lasso).toEqual([]);
+    controller.update(result(clustered()), size, 230, state.settings);
+    expect(controller.visuals.lasso).toHaveLength(1); expect(routed).toEqual([]);
+    controller.update(result(pose('open')), size, 250, state.settings); expect(controller.visuals.lasso).toEqual([]);
+  });
+  it('keeps an active four-fingertip lasso through the wider release band', () => {
+    const state = initialState();
+    const controller = new InteractionController({ send: c => reduce(state, c), routePinch() {}, endPinch() {}, map: p => ({ x: p.x * 1600, y: p.y * 900 }), showPointer() {}, getState: () => state, toast() {} });
+    controller.update(result(clustered()), size, 0, state.settings);
+    controller.update(result(clustered()), size, 230, state.settings);
+    const relaxed = clustered(); relaxed[20] = { x: .66, y: .34 };
+    expect(classifyFourFingertipPinch(relaxed, size).active).toBe(false);
+    controller.update(result(relaxed), size, 250, state.settings);
+    expect(controller.diagnostics.lassoActive).toBe(true);
+    controller.update(result(pose('open')), size, 270, state.settings);
     expect(controller.diagnostics.lassoActive).toBe(false);
   });
 });
@@ -153,11 +195,15 @@ describe('two-hand global control', () => {
     controller.update(result(a),size,0,state.settings); controller.update(result(a),size,250,state.settings);
     expect(state.history.active).not.toBeNull();
     controller.update(result2(a,b),size,300,state.settings); controller.update(result2(a,b),size,800,state.settings);
-    expect(state.settings.paused).toBe(true); expect(state.history.active).toBeNull();
+    expect(state.settings.paused).toBe(false);
+    controller.update(result(pose('ambiguous')),size,820,state.settings); expect(state.history.active).toBeNull();
+    const neutral=pose('ambiguous'), neutral2=neutral.map(p=>({x:p.x+.05,y:p.y}));
+    controller.update(result2(neutral,neutral2),size,900,state.settings); controller.update(result2(neutral,neutral2),size,1400,state.settings);
+    expect(state.settings.paused).toBe(true);
     const actionCount=state.history.actions.length;
-    controller.update(result2(a,b),size,1000,state.settings); expect(state.history.actions).toHaveLength(actionCount);
-    controller.update(result(a),size,1100,state.settings);
-    controller.update(result2(a,b),size,1600,state.settings); controller.update(result2(a,b),size,2100,state.settings);
+    controller.update(result2(neutral,neutral2),size,1500,state.settings); expect(state.history.actions).toHaveLength(actionCount);
+    controller.update(result(neutral),size,1600,state.settings);
+    controller.update(result2(neutral,neutral2),size,2200,state.settings); controller.update(result2(neutral,neutral2),size,2800,state.settings);
     expect(state.settings.paused).toBe(false);
     expect(commands.filter(c=>c.type==='settings' && 'paused' in c.patch)).toHaveLength(2);
   });
@@ -181,7 +227,7 @@ describe('Stylus Assist geometry', () => {
     expect(applyStylusOffset({x:720,y:405},offset)).toEqual({x:800,y:450});
   });
   it('switches the controller pointer from index tip to virtual nib and resets it on loss', () => {
-    const state=initialState(), points=pose('open'); points[4]={x:.4,y:.25}; points[8]={x:.42,y:.23}; state.settings.inputMode='stylus';
+    const state=initialState(), points=pose('open'); points[4]={x:.4,y:.25}; points[8]={x:.42,y:.23}; state.settings.inputMode='pen';
     const controller=new InteractionController({send:c=>reduce(state,c),routePinch(){},endPinch(){},map:p=>({x:p.x*1600,y:p.y*900}),showPointer(){},getState:()=>state,toast(){}});
     controller.update(result(points),size,0,state.settings);
     expect(controller.pointer?.raw).toEqual(virtualNib(points,size)); expect(controller.diagnostics.virtualNibPoint).not.toBeNull();
@@ -191,11 +237,40 @@ describe('Stylus Assist geometry', () => {
   it('captures a center-target offset after an armed stylus pinch', () => {
     const state=initialState(), commands: Command[] = [], points=pose('open'); points[4]={x:.75,y:.25};
     const controller=new InteractionController({send(c){commands.push(c);reduce(state,c);},routePinch(){},endPinch(){},map:p=>({x:p.x*1600,y:p.y*900}),showPointer(){},getState:()=>state,toast(){}});
-    controller.startStylusCalibration(); expect(state.settings.inputMode).toBe('stylus'); expect(controller.visuals.stylusTarget).toBe(true);
+    controller.startStylusCalibration(); expect(state.settings.inputMode).toBe('pen'); expect(controller.visuals.stylusTarget).toBe(true);
     controller.update(result(points),size,0,state.settings);
-    const pinched=points.map(p=>({...p})); pinched[4]={...pinched[8]};
-    controller.update(result(pinched),size,100,state.settings); controller.update(result(pinched),size,170,state.settings);
+    const gripped=pose('fist'); gripped[4]={...gripped[8]}; gripped[12]={x:gripped[8].x+.01,y:gripped[8].y+.01};
+    controller.update(result(gripped),size,100,state.settings); controller.update(result(gripped),size,300,state.settings);
     expect(commands.some(c=>c.type==='settings' && 'stylusOffset' in c.patch)).toBe(true);
     expect(controller.visuals.stylusTarget).toBe(false);
+  });
+  it('uses the pen grip clutch for one stroke and ignores ordinary pinch in Pen Writing mode', () => {
+    const state = initialState(), phases: string[] = []; state.settings.inputMode = 'pen';
+    const controller = new InteractionController({ send: c => reduce(state, c), routePinch(_p, phase) { phases.push(phase); }, endPinch() {}, map: p => ({ x: p.x * 1600, y: p.y * 900 }), showPointer() {}, getState: () => state, toast() {} });
+    controller.update(result(pose('fist')), size, 0, state.settings);
+    const ordinary = pose('open'); ordinary[4] = { ...ordinary[8] };
+    controller.update(result(ordinary), size, 50, state.settings); controller.update(result(ordinary), size, 250, state.settings);
+    expect(phases.filter(phase => phase.startsWith('pinch'))).toEqual([]);
+    controller.update(result(pose('fist')), size, 260, state.settings);
+    controller.update(result(penGrip()), size, 300, state.settings); controller.update(result(penGrip()), size, 500, state.settings);
+    const moved = penGrip().map(point => ({ x: point.x + .02, y: point.y + .01 })); controller.update(result(moved), size, 530, state.settings);
+    controller.update(result(pose('fist')), size, 550, state.settings);
+    expect(phases).toEqual(['pinchStart', 'pinchHold', 'pinchEnd']);
+  });
+  it('requires a fresh release after tracking interruption and mode changes', () => {
+    const state = initialState(), phases: string[] = []; let ended = 0; state.settings.inputMode = 'pen';
+    const controller = new InteractionController({ send: c => reduce(state, c), routePinch(_p, phase) { phases.push(phase); }, endPinch() { ended++; }, map: p => ({ x: p.x * 1600, y: p.y * 900 }), showPointer() {}, getState: () => state, toast() {} });
+    controller.update(result(pose('fist')), size, 0, state.settings);
+    controller.update(result(penGrip()), size, 20, state.settings); controller.update(result(penGrip()), size, 220, state.settings);
+    expect(phases).toEqual(['pinchStart']);
+    controller.reset(); expect(ended).toBeGreaterThan(0);
+    controller.update(result(penGrip()), size, 300, state.settings); controller.update(result(penGrip()), size, 600, state.settings);
+    expect(phases).toEqual(['pinchStart']);
+    controller.update(result(pose('fist')), size, 620, state.settings);
+    controller.update(result(penGrip()), size, 640, state.settings); controller.update(result(penGrip()), size, 840, state.settings);
+    expect(phases).toEqual(['pinchStart', 'pinchStart']);
+    state.settings.inputMode = 'finger'; controller.update(result(pose('ambiguous')), size, 860, state.settings);
+    state.settings.inputMode = 'pen'; controller.update(result(penGrip()), size, 900, state.settings); controller.update(result(penGrip()), size, 1200, state.settings);
+    expect(phases).toEqual(['pinchStart', 'pinchStart']);
   });
 });

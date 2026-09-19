@@ -60,7 +60,7 @@ test('synthetic anatomical right-hand landmarks resize a native shape through th
         [5,9,13,17].forEach((base,finger)=>{const fx=.32+finger*.12;p[base]={x:fx,y:.58};p[base+1]={x:fx,y:.43};p[base+2]={x:fx,y:.28};p[base+3]={x:fx,y:.12};});
         const dx=x-p[8].x,dy=y-p[8].y; for(const q of p){q.x+=dx;q.y+=dy;} if(pinched)p[4]={...p[8]}; return p;
       };
-      const tracked = (points, timestamp) => ({kind:'result',frameId:1,status:'hands',landmarks:points,allLandmarks:[points],duration:1,timestamp,stats:{framesReceived:1,inferenceCalls:1,successfulInferences:1,failedFrames:0,frameId:1,inputWidth:1000,inputHeight:1000,duration:1,landmarksArrayCount:1,detectedHandCount:1,landmarkCounts:[21],handedness:[[{categoryName:'Left',score:.99}]],lastSuccessAt:1,lastError:null,threshold:.65}});
+      const tracked = (points, timestamp) => ({kind:'result',frameId:1,status:'hands',landmarks:points,allLandmarks:[points],duration:1,timestamp,stats:{framesReceived:1,inferenceCalls:1,successfulInferences:1,failedFrames:0,frameId:1,inputWidth:1000,inputHeight:1000,duration:1,landmarksArrayCount:1,detectedHandCount:1,landmarkCounts:[21],handedness:[[{categoryName:'Right',score:.99}]],lastSuccessAt:1,lastError:null,threshold:.65}});
       window.runNativeHandTransform = () => {
         const state=initialState(),commands=[],previews=[]; const object=makeShape('rectangle','shape',90,90,220,140,'#225c4a',5);
         reduce(state,{type:'create-object',object}); reduce(state,{type:'select',ids:[object.id]});

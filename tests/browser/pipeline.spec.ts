@@ -149,17 +149,17 @@ test('writing-plane calibration preferences survive reload and can be reset', as
   await page.addInitScript(() => {
     if (sessionStorage.getItem('airboard-settings-seeded')) return;
     sessionStorage.setItem('airboard-settings-seeded', '1');
-    localStorage.setItem('saai-airboard-hand-settings-v1', JSON.stringify({
+    localStorage.setItem('saai-airboard-hand-settings-v2', JSON.stringify({
       dominantHand: 'Left', gestureSensitivity: 'gentle', openPalmHoldMs: 220, palmEraserSize: 80, lassoCloseRadius: 60,
-      inputMode: 'stylus', stylusOffset: {x:.05,y:-.03}, fistGrabRadius: 75, twoHandHoldMs: 550, twoHandProximity: .2,
+      inputMode: 'pen', stylusOffset: {x:.05,y:-.03}, fistGrabRadius: 75, twoHandHoldMs: 550, twoHandProximity: .2,
       planePoints: [{x:.1,y:.1},{x:.9,y:.15},{x:.8,y:.9},{x:.2,y:.8}],
     }));
   });
   await page.goto('/');
   await page.getByRole('button', { name: 'Calibration & settings', exact: true }).click();
   await expect(page.locator('[data-setting="dominantHand"]')).toHaveValue('Left');
-  await expect(page.locator('[data-setting="inputMode"]')).toHaveValue('stylus');
-  await expect(page.locator('[data-stylus-status]')).toContainText('Offset calibrated');
+  await expect(page.locator('[data-setting="inputMode"]')).toHaveValue('pen');
+  await expect(page.locator('[data-stylus-status]')).toContainText('offset calibrated');
   await expect(page.locator('[data-plane-status]')).toContainText('Calibrated');
   await page.getByRole('button', { name: 'Reset plane', exact: true }).click();
   await expect(page.locator('[data-plane-status]')).toContainText('Not calibrated');

@@ -32,6 +32,15 @@ describe('native board objects', () => {
     expect(currentObjects(state.history)).toHaveLength(4);
     reduce(state, { type: 'undo' }); expect(currentObjects(state.history)).toHaveLength(1);
   });
+  it('replaces a bounded multi-stroke digit as one undoable action', () => {
+    const state = initialState();
+    for (const [id, x] of [['a', 100], ['b', 140]] as const) { reduce(state, { type: 'begin', id, brush: state.settings.brush, point: { x, y: 100 } }); reduce(state, { type: 'point', id, point: { x, y: 220 } }); reduce(state, { type: 'end', id }); }
+    const text = { ...shape('digit', 'text'), text: '4' };
+    reduce(state, { type: 'replace-strokes', strokeIds: ['a', 'b'], object: text });
+    expect(currentStrokes(state.history)).toHaveLength(0); expect(currentObjects(state.history)).toEqual([text]);
+    reduce(state, { type: 'undo' }); expect(currentStrokes(state.history).map(stroke => stroke.id)).toEqual(['a', 'b']);
+    reduce(state, { type: 'redo' }); expect(currentObjects(state.history)).toEqual([text]); expect(validState(state)).toBe(true);
+  });
   it('hit tests and lasso selects native geometry', () => {
     const objects = [shape('box'), shape('arrow', 'arrow')];
     expect(nearestObject(objects, { x: 150, y: 150 }, 5)?.id).toBe('box');

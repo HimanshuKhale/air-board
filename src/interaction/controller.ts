@@ -5,7 +5,7 @@ import { GestureController } from '../input/gesture';
 import type { HandPointer } from '../input/gesture';
 import type { PinchPhase } from '../input/pinch';
 import { ExponentialFilter } from '../input/filter';
-import { anatomicalHandedness, classifyConfirmationPose, classifyPose, palmCenter, type ConfirmationPose, type StaticGesture } from './pose';
+import { anatomicalHandedness, classifyConfirmationPose, classifyFourFingertipPinch, classifyPose, handednessName, palmCenter, type ConfirmationPose, type StaticGesture } from './pose';
 import { PoseStabilizer } from './temporal';
 import { currentObjects, currentStrokes } from '../drawing/history';
 import { nearestObject, selectObjects } from '../drawing/objects';
@@ -16,6 +16,7 @@ import { applyStylusOffset, calibrateStylusOffset, virtualNib } from './stylus';
 import { homographyFromQuad } from '../calibration/homography';
 import { nearestShapeHandle, shapeHandles, transformObject, type ShapeHandle } from '../drawing/transform';
 import type { BoardObject } from '../core/types';
+import { PenWritingController } from './pen-writing';
 
 export type InteractionMode = 'hover' | 'write' | 'erase' | 'lasso' | 'drag' | 'shape-transform' | 'plane-calibration' | 'stylus-calibration';
 export interface InteractionDiagnostics {
@@ -25,6 +26,7 @@ export interface InteractionDiagnostics {
   lassoActive: boolean; selectedStrokeCount: number; grabbedStrokeId: string | null; planeCalibrationActive: boolean; planeCalibrationValid: boolean;
   inputMode: Settings['inputMode']; virtualNibPoint: Point | null; twoHandClose: boolean; twoHandHeldMs: number;
   confirmationGesture: ConfirmationPose; confirmationConfidence: number;
+  writingHand: 'Left' | 'Right'; confirmationHand: 'Left' | 'Right'; penDown: boolean; fourFingertipConfidence: number;
 }
 export interface InteractionHooks {
   send(command: Command): void;
@@ -49,9 +51,11 @@ export class InteractionController {
     interaction: 'hover', handControl: 'enabled', rawPoint: null, mappedPoint: null,
     lassoActive: false, selectedStrokeCount: 0, grabbedStrokeId: null, planeCalibrationActive: false, planeCalibrationValid: false,
     inputMode: 'finger', virtualNibPoint: null, twoHandClose: false, twoHandHeldMs: 0, confirmationGesture: 'neutral', confirmationConfidence: 0,
+    writingHand: 'Right', confirmationHand: 'Left', penDown: false, fourFingertipConfidence: 0,
   };
   readonly visuals: InteractionVisuals = { lasso: [], lassoStart: null, planeTarget: null, planeCaptured: [], movePreview: null, objectPreview: null, stylusTarget: false };
   private gesture = new GestureController();
+  private pen = new PenWritingController();
   private pose = new PoseStabilizer();
   private twoHand = new TwoHandToggle();
   private palmFilter = new ExponentialFilter(0.55);
@@ -68,26 +72,42 @@ export class InteractionController {
   private drag: { ids: string[]; start: Point; current: Point } | null = null;
   private stylusCapture = false;
   private shapeTransform: { baseline: BoardObject; handle: ShapeHandle; preview: BoardObject } | null = null;
+  private lassoCandidateAt: number | null = null;
+  private lassoGestureLatched = false;
+  private lassoBlocked = false;
+  private handednessCheck: 'Left' | 'Right' | null = null;
   constructor(private hooks: InteractionHooks) {}
+  startHandednessCheck(expected: 'Left' | 'Right'): void { this.handednessCheck = expected; this.hooks.toast(`Raise only your physical ${expected.toLowerCase()} hand.`); }
   update(result: TrackingResult, size: Size, now: number, settings: Settings): void {
     this.diagnostics.dominantHand = settings.dominantHand;
+    const confirmationHand = settings.dominantHand === 'Right' ? 'Left' : 'Right';
+    this.diagnostics.writingHand = settings.dominantHand; this.diagnostics.confirmationHand = confirmationHand;
     this.diagnostics.handControl = settings.paused ? 'paused' : 'enabled';
     this.diagnostics.inputMode = settings.inputMode;
     this.diagnostics.selectedStrokeCount = this.hooks.getState().selection.length;
     this.diagnostics.planeCalibrationValid = !!settings.planePoints;
-    const hands = result.allLandmarks.map((landmarks, index) => ({ landmarks, categories: result.stats.handedness[index] ?? [], name: anatomicalHandedness(result.stats.handedness[index] ?? [], false, .7) }));
-    this.diagnostics.detectedHands = hands.map(hand => hand.name ? `${hand.name} ${(hand.categories[0]?.score ?? 0).toFixed(2)}` : 'Unknown');
+    const hands = result.allLandmarks.map((landmarks, index) => {
+      const categories = result.stats.handedness[index] ?? [], raw = handednessName(categories), name = anatomicalHandedness(categories, false, .7);
+      const gesture = landmarks.length === 21 ? classifyPose(landmarks, size, settings.pinchClose).gesture : 'neutral';
+      return { landmarks, categories, raw, name, gesture };
+    });
+    this.diagnostics.detectedHands = hands.map(hand => `raw ${hand.raw ?? 'Unknown'} -> physical ${hand.name ?? 'uncertain'} ${(hand.categories[0]?.score ?? 0).toFixed(2)} · ${hand.gesture}`);
+    if (this.handednessCheck && hands.length === 1 && hands[0].name) {
+      const expected = this.handednessCheck, actual = hands[0].name; this.handednessCheck = null;
+      this.hooks.toast(actual === expected ? `Verified: physical ${expected} is identified as ${actual}.` : `Mismatch: raised ${expected}, tracker reported ${actual}. Keep Debug open and retry.`);
+    }
     const confirmationPending = this.hooks.confirmationPending?.() ?? false;
     if (confirmationPending) {
-      const left = hands.find(hand => hand.name === 'Left' && hand.landmarks.length === 21);
-      const confirmation = left ? classifyConfirmationPose(left.landmarks, size) : { gesture: 'neutral' as const, confidence: 0 };
+      const confirmationSource = hands.find(hand => hand.name === confirmationHand && hand.landmarks.length === 21);
+      const confirmation = confirmationSource ? classifyConfirmationPose(confirmationSource.landmarks, size) : { gesture: 'neutral' as const, confidence: 0 };
       this.diagnostics.confirmationGesture = confirmation.gesture; this.diagnostics.confirmationConfidence = confirmation.confidence;
-      if (left) this.hooks.confirmationPose?.(confirmation.gesture, confirmation.confidence, now); else this.hooks.confirmationInterrupted?.();
+      if (confirmationSource) this.hooks.confirmationPose?.(confirmation.gesture, confirmation.confidence, now); else this.hooks.confirmationInterrupted?.();
       this.twoHand.reset();
     } else {
       this.diagnostics.confirmationGesture = 'neutral'; this.diagnostics.confirmationConfidence = 0;
     }
-    const toggleHandControl = confirmationPending ? false : this.twoHand.update(hands.map(hand => hand.landmarks), size, now, settings.twoHandHoldMs, settings.twoHandProximity);
+    const operationActive = !!this.shapeTransform || !!this.lasso.length || this.pen.down || this.erasing || !!this.drag;
+    const toggleHandControl = confirmationPending || operationActive ? false : this.twoHand.update(hands.map(hand => hand.landmarks), size, now, settings.twoHandHoldMs, settings.twoHandProximity);
     this.diagnostics.twoHandClose = this.twoHand.state.close; this.diagnostics.twoHandHeldMs = this.twoHand.state.heldMs;
     if (toggleHandControl) {
       this.cancelActive(); this.cancelCalibrations();
@@ -97,9 +117,9 @@ export class InteractionController {
       this.hooks.toast(paused ? 'Hand Control Paused. Mouse and touch remain available.' : 'Hand Control Enabled.');
       return;
     }
+    if (!operationActive && this.twoHand.state.close) { this.hooks.endPinch(); this.diagnostics.interaction = 'hover'; return; }
     if (settings.paused) { this.cancelActive(); this.diagnostics.handControl = 'paused'; return; }
-    const activeHand = confirmationPending ? 'Right' : settings.dominantHand;
-    const dominant = hands.find(hand => hand.name === activeHand && hand.landmarks.length === 21);
+    const dominant = hands.find(hand => hand.name === settings.dominantHand && hand.landmarks.length === 21);
     if (!dominant) { this.cancelActive(); return; }
     if (this.lastDominant && this.lastDominant !== dominant.name) this.reset();
     this.lastDominant = dominant.name;
@@ -113,33 +133,40 @@ export class InteractionController {
       if (classification.gesture !== 'fist') this.endDrag(true);
       else { this.continueDrag(dominant.landmarks, size, now, settings); return; }
     }
-    const nib = settings.inputMode === 'stylus' ? virtualNib(dominant.landmarks, size) : null;
+    const nib = settings.inputMode === 'pen' ? virtualNib(dominant.landmarks, size) : null;
     this.diagnostics.virtualNibPoint = nib;
-    const pointer = this.gesture.update(dominant.landmarks, size, now, { ...settings, paused: false }, nib ?? undefined);
-    this.pointer = pointer;
+    const pinchPointer = this.gesture.update(dominant.landmarks, size, now, { ...settings, paused: false });
+    const penPointer = settings.inputMode === 'pen' ? this.pen.update(dominant.landmarks, size, now, settings) : null;
+    if (settings.inputMode !== 'pen') this.pen.reset();
+    this.diagnostics.penDown = this.pen.down;
+    const pointer = pinchPointer ?? penPointer;
+    this.pointer = settings.inputMode === 'pen' ? penPointer ?? pinchPointer : pinchPointer;
     if (!pointer) { this.cancelActive(); return; }
     const raw = pointer.raw;
     const baseMapped = this.hooks.map(pointer.smooth, size, settings);
-    const mapped = settings.inputMode === 'stylus' ? applyStylusOffset(baseMapped, settings.stylusOffset) : baseMapped;
+    const mapped = baseMapped;
+    const penBaseMapped = penPointer ? this.hooks.map(penPointer.smooth, size, settings) : null;
+    const penMapped = penBaseMapped ? applyStylusOffset(penBaseMapped, settings.stylusOffset) : null;
     this.diagnostics.rawPoint = raw; this.diagnostics.mappedPoint = mapped;
     if (this.planeCapture) {
-      this.capturePlanePoint(pointer.smooth, pointer.phase); this.diagnostics.interaction = 'plane-calibration';
-      this.hooks.showPointer(mapped, 18, pointer.phase === 'pinchStart' || pointer.phase === 'pinchHold', String(this.planeCapture.length + 1));
+      const phase = pinchPointer?.phase ?? 'hover'; this.capturePlanePoint(pointer.smooth, phase); this.diagnostics.interaction = 'plane-calibration';
+      this.hooks.showPointer(mapped, 18, phase === 'pinchStart' || phase === 'pinchHold', String(this.planeCapture.length + 1));
       return;
     }
     if (this.stylusCapture) {
       this.diagnostics.interaction = 'stylus-calibration';
-      this.hooks.showPointer(mapped, 18, pointer.phase === 'pinchStart' || pointer.phase === 'pinchHold', 'S');
-      if (pointer.phase === 'pinchStart') {
-        const stylusOffset = calibrateStylusOffset(baseMapped);
+      const calibrationPoint = penMapped ?? mapped, phase = penPointer?.phase ?? 'hover';
+      this.hooks.showPointer(calibrationPoint, 18, phase === 'pinchStart' || phase === 'pinchHold', 'P');
+      if (phase === 'pinchStart' && penBaseMapped) {
+        const stylusOffset = calibrateStylusOffset(penBaseMapped);
         this.hooks.send({ type: 'settings', patch: { stylusOffset } });
         this.stylusCapture = false; this.visuals.stylusTarget = false;
-        this.hooks.toast('Stylus Assist offset calibrated and saved locally.');
+        this.hooks.toast('Pen Writing virtual nib offset calibrated and saved locally.');
       }
       return;
     }
-    if (this.shapeTransform) {
-      if (pointer.phase === 'pinchEnd' || pointer.phase === 'hover') this.endShapeTransform(pointer.phase === 'pinchEnd');
+    if (this.shapeTransform && pinchPointer) {
+      if (pinchPointer.phase === 'pinchEnd' || pinchPointer.phase === 'hover') this.endShapeTransform(pinchPointer.phase === 'pinchEnd');
       else {
         const preview = transformObject(this.shapeTransform.baseline, this.shapeTransform.handle, mapped, settings.shapeResizeMode);
         if (preview) { this.shapeTransform.preview = preview; this.visuals.objectPreview = preview; this.hooks.previewObject?.(preview); }
@@ -147,11 +174,41 @@ export class InteractionController {
       }
       return;
     }
-    if (pointer.phase === 'pinchStart' && this.beginShapeTransform(mapped, settings)) return;
-    // Active lasso and eraser interactions retain ownership until their gesture is released.
+    if (pinchPointer?.phase === 'pinchStart' && this.beginShapeTransform(mapped, settings)) return;
+    if (penPointer?.phase === 'pinchEnd' && penMapped) {
+      this.hooks.routePinch(penMapped, 'pinchEnd'); this.diagnostics.interaction = 'hover'; this.hooks.showPointer(penMapped, 18, false, 'P↑'); return;
+    }
+    const cluster = classifyFourFingertipPinch(dominant.landmarks, size);
+    this.diagnostics.fourFingertipConfidence = cluster.confidence;
+    const clusterWithinReleaseBand = cluster.distances.length === 6
+      && cluster.distances.slice(0, 4).every(value => value <= .62)
+      && cluster.distances[4] <= .78 && cluster.distances[5] >= .3;
+    if (settings.lassoGesture === 'four-fingertip') {
+      if (cluster.active) this.lassoGestureLatched = true;
+      else if (!clusterWithinReleaseBand) { this.lassoGestureLatched = false; this.lassoBlocked = false; }
+    } else {
+      this.lassoGestureLatched = false;
+      if (classification.gesture !== 'index-only') this.lassoBlocked = false;
+    }
+    const lassoPose = settings.lassoGesture === 'four-fingertip' ? this.lassoGestureLatched : classification.gesture === 'index-only';
+    if (lassoPose) this.lassoCandidateAt ??= now; else this.lassoCandidateAt = null;
+    const clusterCenter = [4, 8, 12, 16, 20].reduce((sum, index) => ({ x: sum.x + dominant.landmarks[index].x / 5, y: sum.y + dominant.landmarks[index].y / 5 }), { x: 0, y: 0 });
+    const lassoRaw = settings.lassoGesture === 'four-fingertip' ? clusterCenter : dominant.landmarks[8];
+    const lassoMapped = this.hooks.map(lassoRaw, size, settings);
+    // Active lasso, pen, eraser and drag each retain ownership until their explicit release.
     if (this.lasso.length) {
-      if (classification.gesture !== 'index-only' || now - this.lassoAt > 8000) this.cancelLasso();
-      else { this.continueLasso(mapped, now, settings); return; }
+      if (!lassoPose || now - this.lassoAt > 8000) { if (lassoPose) this.lassoBlocked = true; this.cancelLasso(); }
+      else { this.continueLasso(lassoMapped, now, settings); return; }
+    }
+    if (this.pen.down && penPointer && penMapped) {
+      this.diagnostics.rawPoint = penPointer.raw; this.diagnostics.mappedPoint = penMapped; this.diagnostics.interaction = 'write';
+      this.hooks.routePinch(penMapped, penPointer.phase); this.hooks.showPointer(penMapped, 18, true, 'P'); return;
+    }
+    if (lassoPose) {
+      this.hooks.endPinch();
+      if (this.lassoCandidateAt !== null && now - this.lassoCandidateAt >= settings.lassoHoldMs && !this.lassoBlocked && this.blockedPose !== 'index-only') this.beginLasso(lassoMapped, now);
+      else this.hooks.showPointer(lassoMapped, 18, false, 'L');
+      return;
     }
     if (this.erasing) {
       if (classification.gesture !== 'open-palm') this.endErase();
@@ -161,18 +218,19 @@ export class InteractionController {
       this.hooks.endPinch();
       this.beginErase(dominant.landmarks, size, now, settings); return;
     }
-    if (stable.stable === 'index-only' && classification.gesture === 'index-only' && this.blockedPose !== 'index-only') {
-      this.hooks.endPinch(); this.beginLasso(mapped, now); return;
-    }
     if (stable.stable === 'fist' && classification.gesture === 'fist' && this.blockedPose !== 'fist') {
       this.hooks.endPinch(); this.beginDrag(dominant.landmarks, size, now, settings); return;
     }
-    if (classification.gesture === 'index-only' || classification.gesture === 'fist') {
+    if (classification.gesture === 'fist') {
       this.hooks.endPinch(); this.diagnostics.interaction = 'hover';
-      this.hooks.showPointer(mapped, 14, false, classification.gesture === 'fist' ? 'G' : 'L'); return;
+      this.hooks.showPointer(mapped, 14, false, 'G'); return;
     }
-    this.diagnostics.interaction = pointer.phase === 'pinchStart' || pointer.phase === 'pinchHold' ? 'write' : 'hover';
-    this.hooks.routePinch(mapped, pointer.phase);
+    if (settings.inputMode === 'pen') {
+      this.diagnostics.interaction = 'hover';
+      if (penMapped) this.hooks.showPointer(penMapped, 18, false, 'P↑');
+      return;
+    }
+    const phase = pinchPointer?.phase ?? 'hover'; this.diagnostics.interaction = phase === 'pinchStart' || phase === 'pinchHold' ? 'write' : 'hover'; this.hooks.routePinch(mapped, phase);
   }
   startPlaneCalibration(): void {
     this.cancelActive(); this.stylusCapture = false; this.visuals.stylusTarget = false; this.planeCapture = []; this.visuals.planeCaptured = []; this.visuals.planeTarget = 0;
@@ -186,14 +244,14 @@ export class InteractionController {
   startStylusCalibration(): void {
     this.cancelActive(); this.planeCapture = null; this.visuals.planeCaptured = []; this.visuals.planeTarget = null;
     this.diagnostics.planeCalibrationActive = false;
-    if (this.hooks.getState().settings.inputMode !== 'stylus') this.hooks.send({ type: 'settings', patch: { inputMode: 'stylus' } });
+    if (this.hooks.getState().settings.inputMode !== 'pen') this.hooks.send({ type: 'settings', patch: { inputMode: 'pen' } });
     this.stylusCapture = true; this.visuals.stylusTarget = true;
-    this.hooks.toast('Hold your stylus naturally, align its tip to the center target, then pinch.');
+    this.hooks.toast('Align the estimated nib to the center, release the grip once, then hold the three-point pen grip.');
   }
   resetStylusCalibration(): void {
     this.stylusCapture = false; this.visuals.stylusTarget = false;
     this.hooks.send({ type: 'settings', patch: { stylusOffset: { x: 0, y: 0 } } });
-    this.hooks.toast('Stylus Assist offset reset.');
+    this.hooks.toast('Pen Writing virtual nib offset reset.');
   }
   private capturePlanePoint(point: Point, phase: PinchPhase): void {
     if (!this.planeCapture || phase !== 'pinchStart') return;
@@ -230,7 +288,7 @@ export class InteractionController {
         this.hooks.send({ type: 'select', ids });
         this.hooks.toast(ids.length ? `Selected ${ids.length} stroke${ids.length === 1 ? '' : 's'}.` : 'The lasso did not contain a stroke.');
       } else this.hooks.toast('Lasso was too small or narrow. Try a wider loop.');
-      this.blockedPose = 'index-only'; this.cancelLasso();
+      this.lassoBlocked = true; this.blockedPose = 'index-only'; this.cancelLasso();
     }
   }
   private cancelLasso(): void {
@@ -331,9 +389,9 @@ export class InteractionController {
     if (commit && transform && JSON.stringify(transform.baseline) !== JSON.stringify(transform.preview)) this.hooks.send({ type: 'update-object', object: transform.preview });
   }
   cancelActive(): void {
-    this.endShapeTransform(false); this.endDrag(false); this.endErase(); this.cancelLasso(); this.hooks.endPinch(); this.gesture.reset(); this.pose.reset(); this.palmFilter.reset(); this.fistFilter.reset(); this.lastDominant = null; this.blockedPose = null;
+    this.endShapeTransform(false); this.endDrag(false); this.endErase(); this.cancelLasso(); this.hooks.endPinch(); this.gesture.reset(); this.pen.reset(); this.pose.reset(); this.palmFilter.reset(); this.fistFilter.reset(); this.lastDominant = null; this.blockedPose = null; this.lassoCandidateAt = null; this.lassoGestureLatched = false; this.lassoBlocked = false;
     this.pointer = null;
-    Object.assign(this.diagnostics, { instantaneousGesture: 'neutral', stableGesture: 'neutral', gestureEnterMs: 0, interaction: 'hover', rawPoint: null, mappedPoint: null, virtualNibPoint: null, grabbedStrokeId: null });
+    Object.assign(this.diagnostics, { instantaneousGesture: 'neutral', stableGesture: 'neutral', gestureEnterMs: 0, interaction: 'hover', rawPoint: null, mappedPoint: null, virtualNibPoint: null, grabbedStrokeId: null, penDown: false, fourFingertipConfidence: 0 });
   }
   private cancelCalibrations(): void {
     this.planeCapture = null; this.visuals.planeCaptured = []; this.visuals.planeTarget = null; this.diagnostics.planeCalibrationActive = false;

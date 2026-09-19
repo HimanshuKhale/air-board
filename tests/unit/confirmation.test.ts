@@ -21,9 +21,9 @@ function confirmationPose(kind: 'yes' | 'no'): Point[] {
 
 describe('left-hand gesture approval', () => {
   it('maps raw MediaPipe labels to anatomical hands once', () => {
-    expect(anatomicalHandedness([{ categoryName: 'Right', score: .9 }])).toBe('Left');
-    expect(anatomicalHandedness([{ categoryName: 'Left', score: .9 }])).toBe('Right');
-    expect(anatomicalHandedness([{ categoryName: 'Right', score: .9 }], true)).toBe('Right');
+    expect(anatomicalHandedness([{ categoryName: 'Right', score: .9 }])).toBe('Right');
+    expect(anatomicalHandedness([{ categoryName: 'Left', score: .9 }])).toBe('Left');
+    expect(anatomicalHandedness([{ categoryName: 'Right', score: .9 }], true)).toBe('Left');
     expect(anatomicalHandedness([{ categoryName: 'Right', score: .6 }], false, .7)).toBeNull();
   });
   it('classifies V as yes and shaka as no independent of screen-up', () => {

@@ -1,6 +1,6 @@
 # Verification record
 
-Verified on 2026-09-10 in the supplied Windows workspace.
+Latest verification completed on 2026-09-19 in the supplied Windows workspace.
 
 ## Completed checks
 
@@ -9,9 +9,9 @@ Verified on 2026-09-10 in the supplied Windows workspace.
 - A clean npm ci --offline using the populated local npm cache succeeded, including cached-model checksum verification and local worker bundling.
 - Dependency installation audit: zero reported vulnerabilities.
 - Strict TypeScript typecheck: passed.
-- Vitest: **54/54 unit tests passed**.
-- Vite production build: passed; app entry ~93.2 kB JavaScript / ~29.1 kB gzip, excluding separately served local model/WASM assets.
-- Playwright, installed Microsoft Edge in headless mode, production preview: **12/12 tests passed**.
+- Vitest: **93/93 unit tests passed across 10 files**.
+- Vite production build: passed; 51 modules transformed, app entry 157.25 kB JavaScript / 49.87 kB gzip, excluding separately served local model/WASM assets.
+- Playwright, installed Microsoft Edge in headless mode, production preview: **21/21 tests passed**.
 - Documented npm run dev startup: Vite successfully serves http://127.0.0.1:5173.
 
 ## Browser coverage
@@ -27,15 +27,20 @@ Verified on 2026-09-10 in the supplied Windows workspace.
 9. Portrait frame transport preserves orientation and nonblank opaque pixels, while invalid frames and successful zero-hand inference produce distinct outcomes.
 10. An official local two-hand fixture returns two 21-point landmark arrays through both normalized-canvas and direct-bitmap comparison paths at the original 0.65 thresholds.
 11. Debug preview/threshold controls and landmark overlay operate locally and reset when disabled.
-12. Hand-input mode, Stylus Assist offset and four-point plane preferences persist locally and reset through UI controls.
+12. Hand-input mode, Pen Writing offset and four-point plane preferences persist locally and reset through UI controls.
+13. Synthetic physical-right landmarks acquire and resize a selected native shape through the real controller.
+14. Confident rectangles and circles convert immediately without the legacy approval prompt; digit 2 becomes native text; undo/redo restores rough/clean forms.
+15. Destructive voice clear uses a separate pending YES/NO confirmation and leaves the board unchanged after NO.
 
-Pure unit coverage additionally verifies geometric pose classification, temporal entry/exit, dominant-hand filtering, open-palm erase history, homography/inverse/degeneracy, lasso geometry, nearest-segment hit testing, one-action moves with undo/redo, two-hand hold/rearm/cooldown, and virtual nib/offset geometry.
+Pure unit coverage additionally verifies direct raw-to-physical handedness, complementary writing/confirmation roles, geometric poses, pen-grip down/up/rearming/interruption/mode changes, four-fingertip lasso entry/release hysteresis and pen-grip rejection, open-palm erase history, homography, selection, shape transforms, atomic multi-stroke replacement, two-hand priority and virtual nib/offset geometry.
+
+Digit fixture measurement: **20/20** transformed single-stroke fixtures were recognized, consisting of two generated variants for each digit 0–9. The two supplied multi-stroke fixtures, one 4 and one 5, were also recognized (**2/2**). Explicit transformed comparisons keep the supplied 6/9 and 3/8 fixtures distinct, and Mixed-mode tests retain 0/circle, 1/line and 4/triangle collisions as ink. These deterministic synthetic fixtures check implementation coverage and are not a general handwriting accuracy claim; natural variation still requires real-user evaluation.
 
 Browser request monitoring during ordinary board interaction and the synthetic-camera workflow observed no external HTTP(S) app requests. Synthetic tests do not use the laptop's real webcam or save its imagery.
 
 ## Not verified on real hardware
 
-Actual webcam permission prompt/device selection, real hand recognition through the selected Galaxy/other camera, pose reliability, handwriting feel, physical stylus alignment, two-hand proximity comfort, calibrated physical-plane accuracy, achievable tracking/render FPS, physical mirror alignment, second-monitor fullscreen, and live meeting-app screen sharing.
+Actual webcam permission prompt/device selection, real physical-right/left label verification, hand-role stability with preview mirror on/off, Pen Writing grip reliability, physical pen alignment, four-fingertip lasso reliability and fallback need, natural handwriting/digit accuracy, two-hand proximity comfort, calibrated physical-plane accuracy, achievable tracking/render FPS, second-monitor fullscreen, and live meeting-app screen sharing.
 
 Use MANUAL_TEST_CHECKLIST.md to record those results before teaching. Automated blank/synthetic frames demonstrate runtime integration, not successful recognition of a real hand.
 

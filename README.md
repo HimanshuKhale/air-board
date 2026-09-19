@@ -1,6 +1,6 @@
 # SAAI AirBoard
 
-A local hand-controlled teaching whiteboard for Windows. Pinch to draw, open a palm to erase, point to lasso, form a fist to move strokes, and bring two hands together to pause or resume hand control. Mouse and touch work alongside hand input.
+A local hand-controlled teaching whiteboard for Windows. The configured writing hand defaults to the physical right hand; the other hand is reserved for pending confirmations. Finger mode pinches to draw, while Pen Writing uses an estimated virtual nib and a stable pen-grip clutch. Open a palm to erase, cluster all four fingertips at the thumb to lasso, form a fist to move content, and bring two hands together to pause or resume hand control. Mouse and touch work alongside hand input.
 
 Built with Vite, TypeScript, Canvas and MediaPipe Hand Landmarker. Core drawing and gestures remain local. An optional loopback Node speech service can transcribe microphone segments; it is separate from camera and board processing. No React, database, authentication, analytics or runtime CDN.
 
@@ -32,7 +32,7 @@ The first setup needs internet. Afterward runtime works offline while the localh
 
 ## AirBoard Intelligence V1
 
-Smart Shapes is on by default. Draw a rough line, square, rectangle, parallelogram, trapezoid, pentagon, hexagon, polygon, circle, ellipse, triangle or arrow with mouse, touch or pinch. A translucent clean preview appears for eight seconds, exactly five seconds longer than the original window. Choose **✌️ YES** to replace the rough stroke with an editable native object, or **🤙 NO** to keep the ink. During that window, hold a V sign with the anatomical left hand to approve or a shaka sign to reject; the hold duration is configurable from 300–500 ms. The gesture must be released before it can answer another request. Mouse and touch buttons remain available. Undo after conversion restores the original stroke. Settings can disable suggestions or enable delayed automatic conversion for high-confidence matches. Small marks, highlighter and eraser strokes are excluded; geometry alone cannot reliably distinguish a large handwritten O from a circle, so automatic conversion is off by default.
+Smart recognition is on by default. In **Shapes** mode, a confident rough line, square, rectangle, parallelogram, trapezoid, pentagon, hexagon, polygon, circle, ellipse, triangle or arrow becomes an editable native object immediately after release. **Digits** mode recognizes local template candidates for 0–9 and creates editable native text; a bounded 450 ms window can group two nearby strokes for 4 and 5. **Mixed** mode uses higher thresholds and leaves 0/circle, 1/line and 4/triangle collisions as ink. Every replacement is one undoable action and uncertain input remains unchanged. These automatic conversions do not display a confirmation prompt. V means YES and shaka means NO on the complementary physical hand only while a separate confirmation request is pending.
 
 Native objects include all shapes listed above plus text and connectors. Open **Shapes** to create one directly. A selected shape shows handles: **Scale** provides whole-shape controls, **Points** exposes polygon vertices and edges, and **Proportional/Free** chooses the resize constraint. Drag handles with mouse or touch, or pinch them with the anatomical right hand. Lines and arrows expose endpoints; circles and ellipses expose radii. Each completed transform produces one undo entry, while tracking loss cancels its preview. Multiple selected objects can still move together with fist drag or Shift-drag as one history action.
 
@@ -71,10 +71,10 @@ npm.cmd run build
 ## Teach with AirBoard
 
 1. Choose a camera in Studio, then Start camera and allow browser access.
-2. Choose the dominant hand in Settings. Open it once before the first pinch and after tracking loss.
-3. Pinch with the dominant hand to draw. Hold an open palm briefly to erase, trace a closed loop with only the index extended to select, or hold a fist near a stroke/selection to drag it.
+2. Keep the default physical Right writing hand, or explicitly choose another dominant hand in Settings. Use **Verify physical Right/Left** with one hand visible and check the raw-to-physical mapping in Debug.
+3. In Finger mode, open once and pinch to draw. In Pen Writing, release the grip once, then hold a stable thumb/index/middle writing grip to lower the estimated nib; releasing lifts it. Hold an open palm briefly to erase, trace a closed loop while all four fingertips cluster at the thumb to select, or hold a fist near a stroke/selection to drag it.
 4. Bring both palm centers close for about half a second to pause or resume hand input. Separate them before toggling again. Mouse and touch remain available while paused.
-5. Optionally calibrate a four-corner physical writing plane or choose Stylus Assist and calibrate its virtual nib offset.
+5. Optionally calibrate a four-corner physical writing plane or choose Pen Writing and calibrate its virtual nib offset.
 6. Select a white/black/custom board, local image, or camera background. Image/camera fit supports contain, cover and stretch; camera supports mirroring and dimming.
 7. Open Presentation, move it to your teaching monitor, and screen-share that window. Press F for fullscreen.
 8. Save PNG for background + drawing, or Drawing only for transparent PNG.
@@ -103,7 +103,7 @@ Shortcuts do not intercept typing in form fields or settings dialogs. Ctrl also 
 
 Calibration is optional. Defaults are mirror on, EMA response 0.6, close ratio 0.28, release ratio 0.42 and close debounce 65 ms. The pinch ratio compares tip distance to palm size, with camera aspect correction. Lower pointer response adds smoothing; higher response follows the finger more quickly.
 
-Writing-plane calibration captures Top Left, Top Right, Bottom Right and Bottom Left in normalized camera space, validates a convex non-degenerate quadrilateral, and computes a projective homography to the 1600Ã—900 board. Hand settings and calibration points are stored locally. Stylus Assist estimates a nib from the thumb/index midpoint and palm orientation; it does not detect the physical pen or use another model.
+Writing-plane calibration captures Top Left, Top Right, Bottom Right and Bottom Left in normalized camera space, validates a convex non-degenerate quadrilateral, and computes a projective homography to the 1600Ã—900 board. Hand settings and calibration points are stored locally. Pen Writing estimates a virtual nib from the thumb/index midpoint and palm orientation and applies a calibrated board offset. MediaPipe does not detect the physical pen tip or surface contact.
 
 Calibration shows hand detection, raw/smoothed coordinates, pinch ratio/phase, and local FPS/inference timing. The red debug dot is raw; green is smoothed. Hand Landmarker uses configured detection/presence/tracking thresholds of 0.65. It does not expose a useful per-frame detection confidence value, so the UI does not invent one. Reset calibration restores defaults without clearing your drawing.
 
@@ -120,7 +120,7 @@ npm.cmd run test:ui
 
 The browser suite uses installed Microsoft Edge in **headless** mode and serves the production build automatically at port 4173. Run build before test:ui after changing code. It needs no real webcam: permission denial and synthetic video are explicitly supplied by tests. If Edge is absent, install it or change the Playwright channel in playwright.config.ts to chrome for an installed Chrome.
 
-Unit tests cover gesture geometry and timing, homography, lasso selection, nearest-segment grabs, move undo/redo, two-hand debounce/cooldown, Stylus Assist geometry, frame transport and existing drawing behavior. Browser tests cover Canvas output, synchronization, camera ownership, synthetic video, worker/model/WASM execution and a local known-hand fixture.
+Unit tests cover physical-hand roles, gesture geometry and timing, pen clutch rearming, four-fingertip lasso hysteresis, homography, selection, shape transforms, digit fixtures, replacement history, two-hand debounce/cooldown, frame transport and existing drawing behavior. Browser tests cover Canvas output, instant recognition and undo/redo, synchronization, camera ownership, synthetic video, worker/model/WASM execution and a local known-hand fixture.
 
 **Automated passes do not mean your webcam has been validated.** Complete [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) before a class, especially pinch reliability, tracking loss/reacquisition, mirror alignment, latency, camera switching, second-monitor fullscreen, screen sharing and offline operation. No separate lint configuration is present; strict TypeScript checks include unused code.
 
@@ -137,7 +137,7 @@ See [asset provenance](docs/THIRD_PARTY_ASSETS.md) and public/asset-manifest.jso
 ## Limitations and troubleshooting
 
 - **Memory-only sessions:** closing/reloading the final window loses editable drawing history and uploaded images. Save PNG before closing. Opening another window receives the existing session. There is no editable board import/autosave in this MVP.
-- **Landmark visibility:** use even lighting and keep the manipulating hand visible. Two hands are used only for the global pause/resume gesture. A 250 ms stale-tracking watchdog cancels in-flight hand interactions safely.
+- **Landmark visibility:** use even lighting and keep the manipulating hand visible. The physical right hand manipulates the board by default; the complementary hand answers only a pending confirmation. Both hands together control global pause/resume when no transform, lasso, pen stroke, erase, drag or confirmation owns the interaction. A 250 ms stale-tracking watchdog cancels in-flight hand interactions safely.
 - **Camera unavailable:** allow camera access through the browser address-bar icon. Close another app using the webcam, reconnect it, select the device, and retry. Start in another AirBoard window deliberately transfers ownership.
 - **Camera in Presentation:** this is expected. Studio does not duplicate or relay camera pixels. Start Camera in Studio transfers capture back. Closing the owner does not automatically restart the camera elsewhere.
 - **Lag:** keep Presentation visible, improve lighting, and try a different webcam. The CPU worker is adaptive; 20–30 tracking FPS is a target, not a hardware guarantee. Background browser tabs may be throttled. Mouse input remains available.
@@ -158,9 +158,9 @@ See [asset provenance](docs/THIRD_PARTY_ASSETS.md) and public/asset-manifest.jso
 | src/core/types.ts, settings.ts, coordinates.ts | Generic board types, defaults and coordinate spaces |
 | src/camera/manager.ts, session.ts | Devices/stream lifecycle and exclusive camera ownership |
 | src/tracking/hand.worker.ts, tracker.ts | MediaPipe worker and throttled frame scheduler |
-| src/input/, src/interaction/ | Pinch machine, smoothing, pointer routing, geometric poses, central arbitration, two-hand toggle and Stylus Assist |
+| src/input/, src/interaction/ | Pinch machine, smoothing, pointer routing, physical-hand roles, geometric poses, Pen Writing clutch, central arbitration and two-hand toggle |
 | src/calibration/, src/selection/ | Homography/local calibration persistence and lasso/nearest-stroke geometry |
-| src/drawing/history.ts, engine.ts | Stroke/clear/move history, live move previews and transparent rendering |
+| src/drawing/history.ts, engine.ts, recognition.ts, digits.ts, smart-recognition.ts | Stroke/object history, instant shape and digit recognition, live previews and transparent rendering |
 | src/background/renderer.ts | Local images, blank/video backgrounds and fitting |
 | src/export/compositor.ts | UI-free PNG composition and download |
 | src/sync/protocol.ts, channel.ts | Validated state reducer, BroadcastChannel and leader election |

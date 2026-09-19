@@ -3,7 +3,7 @@ import { studio } from './ui/studio';
 import { presentation } from './ui/presentation';
 import { dialogs } from './ui/dialogs';
 import { bindControls, updateControls } from './ui/controls';
-import { BOARD } from './core/types';
+import { BOARD, type Stroke } from './core/types';
 import { cameraToCanvas, canvasToClient } from './core/coordinates';
 import { BoardChannel } from './sync/channel';
 import { DrawingEngine } from './drawing/engine';
@@ -22,13 +22,14 @@ import { PlaneMapper } from './calibration/homography';
 import { drawInteractionOverlay } from './ui/interaction-overlay';
 import { currentObjects, currentStrokes } from './drawing/history';
 import { recognizeStroke } from './drawing/recognition';
-import { paintObject } from './drawing/objects';
-import type { BoardObject } from './core/types';
 import { SpeechController } from './ai/speech';
 import { parseCommand } from './ai/commands';
 import { executeIntent } from './ai/execute';
 import { ConfirmationMachine, type ConfirmationDecision } from './interaction/confirmation';
 import { makeShape } from './drawing/geometry';
+import { recognizeDigit } from './drawing/digits';
+import { bounds } from './selection/geometry';
+import { chooseRecognition } from './drawing/smart-recognition';
 
 const isPresentation = location.pathname === '/present';
 document.body.classList.toggle('is-presentation', isPresentation);
@@ -54,7 +55,7 @@ const camera = new CameraSession(video, bus, isPresentation ? 'Presentation' : '
 const pipelineDebug = new PipelineDebug(camera);
 const input = new InputRouter(drawing.canvas, bus);
 const planeMapper = new PlaneMapper();
-let pendingShape: { requestId: string; strokeId: string; object: BoardObject; confidence: number } | null = null;
+let pendingConfirmation: { requestId: string; kind: 'clear' } | null = null;
 const confirmation = new ConfirmationMachine(bus.state.settings.confirmationHoldMs);
 const interactions = new InteractionController({
   send: command => bus.send(command),
@@ -70,7 +71,7 @@ const interactions = new InteractionController({
   confirmationPending: () => !!confirmation.request,
   confirmationPose: (pose, confidence, now) => {
     const result = confirmation.observe(pose, confidence, now);
-    if (result) resolveShapeDecision(result.id, result.decision);
+    if (result) resolvePendingConfirmation(result.id, result.decision);
   },
   confirmationInterrupted: () => confirmation.interrupt(),
   toast,
@@ -90,6 +91,7 @@ let toastTimer = 0, lastMetrics = 0, lastPointerTime = 0;
 let previousGeometry = '';
 let previousPaused = bus.state.settings.paused;
 let lastAiActionPosition = -1;
+let digitGroup: { strokes: Stroke[]; timer: number; startedAt: number } | null = null;
 const aiRequestIds = new Set<string>();
 const recentTranscripts = new Map<string, number>();
 const aiStatus = (message: string) => { el('ai-status').textContent = message; };
@@ -100,6 +102,18 @@ function runVoiceCommand(text: string, requestId = crypto.randomUUID()): void {
   if (!key || Date.now() - (recentTranscripts.get(key) ?? 0) < 15000) return;
   const intent = parseCommand(text, el<HTMLInputElement>('command-mode').checked);
   if (!intent) { aiStatus('No supported explicit command found. Say “AirBoard” first or enable Command Mode.'); return; }
+  if (intent.kind === 'clear') {
+    if (pendingConfirmation) { aiStatus('Answer the pending confirmation first.'); return; }
+    confirmation.setHoldMs(bus.state.settings.confirmationHoldMs);
+    confirmation.begin(requestId, 'Clear the entire board', performance.now());
+    pendingConfirmation = { requestId, kind: 'clear' };
+    recentTranscripts.set(key, Date.now());
+    el('shape-suggestion-label').textContent = 'Clear the entire board?';
+    el('shape-gesture-feedback').textContent = 'Left-hand V confirms · shaka cancels';
+    el('shape-suggestion').hidden = false;
+    aiStatus('Clear pending. Use YES/V to confirm or NO/shaka to cancel.');
+    return;
+  }
   try {
     aiRequestIds.add(requestId);
     const message = executeIntent(bus, intent, requestId, () => window.confirm('Clear the entire board? This can be undone.'));
@@ -128,30 +142,34 @@ el('undo-ai').addEventListener('click', () => {
   if (lastAiActionPosition < 0 || bus.state.history.position !== lastAiActionPosition) { aiStatus('Undo newer board actions first, then try Undo Last AI Action.'); return; }
   bus.send({ type: 'undo' }); lastAiActionPosition = -1; aiStatus('Undid last AI action.');
 });
-function clearShapePrompt(cancel = false): void {
+function clearConfirmationPrompt(cancel = false): void {
   if (cancel) confirmation.cancel();
-  pendingShape = null; el('shape-suggestion').hidden = true;
+  pendingConfirmation = null; el('shape-suggestion').hidden = true;
 }
-function resolveShapeDecision(requestId: string, decision: ConfirmationDecision): void {
-  const candidate = pendingShape;
-  if (!candidate || candidate.requestId !== requestId) return;
-  clearShapePrompt();
-  if (decision === 'yes' || decision === 'timeout' && bus.leader && bus.state.settings.autoConvertShapes && candidate.confidence >= .9)
-    bus.send({ type: 'replace-stroke', strokeId: candidate.strokeId, object: candidate.object });
+function resolvePendingConfirmation(requestId: string, decision: ConfirmationDecision): void {
+  const pending = pendingConfirmation;
+  if (!pending || pending.requestId !== requestId) return;
+  clearConfirmationPrompt();
+  if (decision !== 'yes') { aiStatus(decision === 'timeout' ? 'Clear confirmation timed out.' : 'Clear cancelled.'); return; }
+  try {
+    aiRequestIds.add(requestId);
+    const message = executeIntent(bus, { kind: 'clear' }, requestId, () => true);
+    aiStatus(message); aiLog(message);
+  } catch (error) { aiRequestIds.delete(requestId); aiStatus(error instanceof Error ? error.message : 'Clear failed.'); }
 }
-function decideShape(decision: 'yes' | 'no'): void {
+function decidePendingConfirmation(decision: 'yes' | 'no'): void {
   const request = confirmation.request;
   if (!request) return;
   const result = confirmation.settle(request.id, decision);
-  if (result) resolveShapeDecision(result.id, result.decision);
+  if (result) resolvePendingConfirmation(result.id, result.decision);
 }
-el('shape-convert').addEventListener('click', () => decideShape('yes'));
-el('shape-keep').addEventListener('click', () => decideShape('no'));
+el('shape-convert').addEventListener('click', () => decidePendingConfirmation('yes'));
+el('shape-keep').addEventListener('click', () => decidePendingConfirmation('no'));
 window.addEventListener('keydown', event => {
-  if (!pendingShape || (event.target as HTMLElement).closest('input,select,textarea,[contenteditable]')) return;
+  if (!pendingConfirmation || (event.target as HTMLElement).closest('input,select,textarea,[contenteditable]')) return;
   const key = event.key.toLowerCase();
-  if (key === 'y' || key === 'enter') { event.preventDefault(); decideShape('yes'); }
-  if (key === 'n' || key === 'escape') { event.preventDefault(); decideShape('no'); }
+  if (key === 'y' || key === 'enter') { event.preventDefault(); decidePendingConfirmation('yes'); }
+  if (key === 'n' || key === 'escape') { event.preventDefault(); decidePendingConfirmation('no'); }
 });
 const cursor = el<HTMLDivElement>('hand-cursor');
 function toast(message: string): void {
@@ -176,6 +194,38 @@ async function listCameras(): Promise<void> {
   } catch (error) { toast(error instanceof Error ? error.message : String(error)); }
 }
 function selectedCamera(): string | undefined { return (el<HTMLSelectElement>(isPresentation ? 'present-camera-select' : 'camera-select')?.value) || undefined; }
+function nearbyDigitStroke(a: Stroke[], b: Stroke): boolean {
+  const first = bounds(a.flatMap(stroke => stroke.points)), next = bounds(b.points), padding = Math.max(55, Math.max(first.maxX - first.minX, first.maxY - first.minY, next.maxX - next.minX, next.maxY - next.minY) * .65);
+  return next.minX <= first.maxX + padding && next.maxX >= first.minX - padding && next.minY <= first.maxY + padding && next.maxY >= first.minY - padding;
+}
+function commitDigitGroup(): void {
+  const group = digitGroup; digitGroup = null; if (!group || !bus.leader) return;
+  clearTimeout(group.timer);
+  const live = currentStrokes(bus.state.history), strokes = group.strokes.filter(stroke => live.some(item => item.id === stroke.id));
+  if (!strokes.length) return;
+  const match = recognizeDigit(strokes);
+  if (match && match.confidence >= .7) bus.send(strokes.length === 1 ? { type: 'replace-stroke', strokeId: strokes[0].id, object: match.object } : { type: 'replace-strokes', strokeIds: strokes.map(stroke => stroke.id), object: match.object });
+}
+function queueDigitStroke(stroke: Stroke, now: number): void {
+  if (digitGroup && (now - digitGroup.startedAt > 650 || !nearbyDigitStroke(digitGroup.strokes, stroke))) commitDigitGroup();
+  if (!digitGroup) digitGroup = { strokes: [], timer: 0, startedAt: now };
+  digitGroup.strokes.push(stroke); clearTimeout(digitGroup.timer);
+  const match = recognizeDigit(digitGroup.strokes);
+  if (digitGroup.strokes.length === 2 && match && match.confidence >= .68) { commitDigitGroup(); return; }
+  digitGroup.timer = window.setTimeout(commitDigitGroup, 450);
+}
+function recognizeCompletedStroke(stroke: Stroke): void {
+  if (!bus.leader || !bus.state.settings.smartShapes) return;
+  const mode = bus.state.settings.recognitionMode, shape = mode === 'digits' ? null : recognizeStroke(stroke), digit = mode === 'shapes' ? null : recognizeDigit([stroke]);
+  if (mode === 'shapes') { const choice = chooseRecognition(mode, shape, digit); if (choice?.kind === 'shape') bus.send({ type: 'replace-stroke', strokeId: stroke.id, object: choice.candidate.object }); return; }
+  if (mode === 'digits') {
+    if (digit && digit.confidence >= .76) bus.send({ type: 'replace-stroke', strokeId: stroke.id, object: digit.object });
+    else queueDigitStroke(stroke, performance.now());
+    return;
+  }
+  const choice = chooseRecognition(mode, shape, digit);
+  if (choice) bus.send({ type: 'replace-stroke', strokeId: stroke.id, object: choice.candidate.object });
+}
 async function exportBoard(transparent: boolean): Promise<void> {
   try {
     input.end();
@@ -210,6 +260,7 @@ bindControls(bus, {
   resetPlane: () => { interactions.resetPlaneCalibration(); planeMapper.reset(); },
   calibrateStylus: () => interactions.startStylusCalibration(),
   resetStylus: () => interactions.resetStylusCalibration(),
+  verifyHand: hand => interactions.startHandednessCheck(hand),
   createShape: type => {
     const count = currentObjects(bus.state.history).length;
     const width = ['line', 'arrow'].includes(type) ? 240 : type === 'square' || type === 'circle' ? 150 : 220;
@@ -222,27 +273,16 @@ bindControls(bus, {
 bus.onChange = (command, requestId) => {
   drawing.invalidate(!command || !['begin', 'point'].includes(command.type));
   if (requestId && aiRequestIds.delete(requestId) && command && !['select', 'undo', 'redo'].includes(command.type)) lastAiActionPosition = bus.state.history.position;
-  if (command?.type === 'replace-stroke' && pendingShape?.strokeId === command.strokeId) clearShapePrompt(true);
   if (command?.type === 'end' && bus.state.settings.smartShapes) {
     const action = bus.state.history.actions.at(bus.state.history.position - 1);
-    if (action?.kind === 'stroke' && action.stroke.id === command.id) {
-      const match = recognizeStroke(action.stroke);
-      if (match) {
-        clearShapePrompt(true);
-        const requestId = crypto.randomUUID();
-        pendingShape = { requestId, strokeId: action.stroke.id, ...match };
-        confirmation.setHoldMs(bus.state.settings.confirmationHoldMs);
-        confirmation.begin(requestId, `Clean ${match.object.type}`, performance.now());
-        el('shape-suggestion-label').textContent = `Clean ${match.object.type}?`;
-        el('shape-suggestion').hidden = false;
-      }
-    }
+    if (action?.kind === 'stroke' && action.stroke.id === command.id) recognizeCompletedStroke(action.stroke);
   }
   if (!command || command.type === 'settings') {
     backgroundDirty = true;
     void background.setImage(bus.state.settings.background.image).then(() => { backgroundDirty = true; }).catch(() => toast('This background image could not be decoded.'));
     const s = bus.state.settings;
-    const geometry = JSON.stringify([s.background.mirror, s.background.mode, s.background.fit, s.inputMode, s.dominantHand]);
+    if (command?.type === 'settings' && ('recognitionMode' in command.patch || 'smartShapes' in command.patch) && digitGroup) { clearTimeout(digitGroup.timer); digitGroup = null; }
+    const geometry = JSON.stringify([s.background.mirror, s.background.mode, s.background.fit, s.inputMode, s.dominantHand, s.lassoGesture]);
     if (geometry !== previousGeometry) { previousGeometry = geometry; releaseHand(); }
     if (s.paused !== previousPaused) { previousPaused = s.paused; interactions.cancelActive(); input.endHand(); }
     video.style.transform = s.background.mirror ? 'scaleX(-1)' : '';
@@ -269,7 +309,7 @@ camera.onStatus = message => {
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-action="start-camera"]')) button.disabled = camera.starting || camera.active;
   if (/denied|failed|unavailable|disconnected|stopped:|timed out/i.test(message)) toast(message);
   const hint = el('input-hint');
-  if (hint) hint.textContent = camera.remote ? 'Hand control and live camera are in ' + camera.remote.view + '. Studio controls stay synchronized.' : 'Mouse & touch ready. Open your hand, then pinch to draw.';
+  if (hint) hint.textContent = camera.remote ? 'Hand control and live camera are in ' + camera.remote.view + '. Studio controls stay synchronized.' : bus.state.settings.inputMode === 'pen' ? 'Pen Writing ready. Hold the three-point grip to lower the estimated nib.' : 'Finger mode ready. Open your hand, then pinch to draw.';
 };
 camera.onStop = () => { releaseHand(); backgroundDirty = true; document.body.classList.remove('camera-running'); };
 camera.onStarted = () => { void listCameras(); document.body.classList.add('camera-running'); };
@@ -310,7 +350,7 @@ document.querySelectorAll<HTMLInputElement>('#debug-toggle,[data-pipeline-debug]
 document.addEventListener('visibilitychange', () => { if (document.hidden) { releaseHand(); input.end(); } });
 window.addEventListener('blur', releaseHand);
 navigator.mediaDevices?.addEventListener('devicechange', () => { void listCameras(); });
-window.addEventListener('pagehide', () => { speech.stop(); camera.close(); bus.close(); }, { once: true });
+window.addEventListener('pagehide', () => { if (digitGroup) clearTimeout(digitGroup.timer); speech.stop(); camera.close(); bus.close(); }, { once: true });
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
 let frame = 0;
 function render(now: number): void {
@@ -320,13 +360,12 @@ function render(now: number): void {
   drawing.render(bus.state.history);
   overlayContext.clearRect(0, 0, BOARD.width, BOARD.height);
   drawInteractionOverlay(overlayContext, interactions.visuals, currentStrokes(bus.state.history, interactions.visuals.movePreview), bus.state.selection, currentObjects(bus.state.history, interactions.visuals.movePreview), s);
-  if (pendingShape) { overlayContext.save(); overlayContext.globalAlpha = 0.55; paintObject(overlayContext, pendingShape.object); overlayContext.restore(); }
   const confirmationResult = confirmation.tick(now);
-  if (confirmationResult) resolveShapeDecision(confirmationResult.id, confirmationResult.decision);
-  if (pendingShape) {
+  if (confirmationResult) resolvePendingConfirmation(confirmationResult.id, confirmationResult.decision);
+  if (pendingConfirmation) {
     el('shape-countdown').textContent = `${(confirmation.remaining(now) / 1000).toFixed(1)}s`;
     const progress = confirmation.progress;
-    el('shape-gesture-feedback').textContent = progress.pose === 'CONFIRM_YES' ? `V held ${Math.round(progress.heldMs)} ms` : progress.pose === 'CONFIRM_NO' ? `Shaka held ${Math.round(progress.heldMs)} ms` : 'Show V to convert or shaka to keep ink';
+    el('shape-gesture-feedback').textContent = progress.pose === 'CONFIRM_YES' ? `V held ${Math.round(progress.heldMs)} ms` : progress.pose === 'CONFIRM_NO' ? `Shaka held ${Math.round(progress.heldMs)} ms` : 'Left-hand V confirms · shaka cancels';
   }
   if (hand && now - lastTracking > 250) releaseHand();
   if (now - lastPointerTime > 1800) cursor.hidden = true;
@@ -338,12 +377,14 @@ function render(now: number): void {
     const interaction = interactions.diagnostics;
     pipelineDebug.interactionText = [
       `Dominant hand: ${interaction.dominantHand}; detected: ${interaction.detectedHands.join(', ') || 'none'}`,
+      `Writing/manipulation role: ${interaction.writingHand}; confirmation role: ${interaction.confirmationHand}`,
       `Gesture: ${interaction.instantaneousGesture}; stable: ${interaction.stableGesture}; enter: ${Math.round(interaction.gestureEnterMs)} ms`,
+      `Confirmation: ${interaction.confirmationGesture} (${interaction.confirmationConfidence.toFixed(2)}); four-fingertip pinch: ${interaction.fourFingertipConfidence.toFixed(2)}`,
       `Active interaction: ${interaction.interaction}; hand control: ${interaction.handControl}`,
       `Two-hand close: ${interaction.twoHandClose}; hold: ${Math.round(interaction.twoHandHeldMs)} ms`,
       `Lasso active: ${interaction.lassoActive}; selected strokes: ${interaction.selectedStrokeCount}; grabbed: ${interaction.grabbedStrokeId ?? 'none'}`,
       `Plane calibration: ${interaction.planeCalibrationActive ? 'active' : interaction.planeCalibrationValid ? 'valid' : 'not calibrated'}`,
-      `Input mode: ${interaction.inputMode}; virtual nib: ${interaction.virtualNibPoint ? interaction.virtualNibPoint.x.toFixed(3) + ', ' + interaction.virtualNibPoint.y.toFixed(3) : 'none'}`,
+      `Input mode: ${interaction.inputMode}; pen ${interaction.penDown ? 'DOWN' : 'UP'}; virtual nib: ${interaction.virtualNibPoint ? interaction.virtualNibPoint.x.toFixed(3) + ', ' + interaction.virtualNibPoint.y.toFixed(3) : 'none'}`,
       `Raw pointer: ${interaction.rawPoint ? interaction.rawPoint.x.toFixed(3) + ', ' + interaction.rawPoint.y.toFixed(3) : 'none'}`,
       `Mapped pointer: ${interaction.mappedPoint ? interaction.mappedPoint.x.toFixed(1) + ', ' + interaction.mappedPoint.y.toFixed(1) : 'none'}`,
     ].join('\n');

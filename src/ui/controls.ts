@@ -9,6 +9,7 @@ export interface ControlsActions {
   calibratePlane(): void; resetPlane(): void;
   calibrateStylus(): void; resetStylus(): void;
   createShape(type: ShapeKind): void;
+  verifyHand(hand: 'Left' | 'Right'): void;
 }
 export function bindControls(bus: BoardChannel, actions: ControlsActions): void {
   const sendSettings = (patch: Partial<Settings>) => { actions.interrupt(); bus.send({ type: 'settings', patch }); };
@@ -59,6 +60,8 @@ export function bindControls(bus: BoardChannel, actions: ControlsActions): void 
       case 'reset-plane': actions.resetPlane(); break;
       case 'calibrate-stylus': actions.calibrateStylus(); dialog('settings-dialog').close(); break;
       case 'reset-stylus': actions.resetStylus(); break;
+      case 'verify-right-hand': actions.verifyHand('Right'); break;
+      case 'verify-left-hand': actions.verifyHand('Left'); break;
       case 'reset-settings': {
         const d = defaults();
         sendSettings({ smoothing: d.smoothing, pinchClose: d.pinchClose, pinchOpen: d.pinchOpen, debounceMs: d.debounceMs, background: { ...settings.background, mirror: true } });
@@ -83,8 +86,10 @@ export function bindControls(bus: BoardChannel, actions: ControlsActions): void 
       case 'smartShapes': case 'autoConvertShapes': sendSettings({ [name]: input.checked }); break;
       case 'dominantHand': sendSettings({ dominantHand: input.value as Settings['dominantHand'] }); break;
       case 'inputMode': sendSettings({ inputMode: input.value as Settings['inputMode'] }); break;
+      case 'recognitionMode': sendSettings({ recognitionMode: input.value as Settings['recognitionMode'] }); break;
+      case 'lassoGesture': sendSettings({ lassoGesture: input.value as Settings['lassoGesture'] }); break;
       case 'gestureSensitivity': sendSettings({ gestureSensitivity: input.value as Settings['gestureSensitivity'] }); break;
-      case 'openPalmHoldMs': case 'palmEraserSize': case 'lassoCloseRadius': case 'fistGrabRadius': case 'twoHandHoldMs': case 'twoHandProximity': case 'confirmationHoldMs': sendSettings({ [name]: Number(input.value) }); break;
+      case 'openPalmHoldMs': case 'palmEraserSize': case 'lassoCloseRadius': case 'lassoHoldMs': case 'penGripHoldMs': case 'fistGrabRadius': case 'twoHandHoldMs': case 'twoHandProximity': case 'confirmationHoldMs': sendSettings({ [name]: Number(input.value) }); break;
       case 'smoothing': case 'pinchClose': case 'pinchOpen': case 'debounceMs': sendSettings({ [name]: Number(input.value) }); break;
     }
   });
@@ -129,13 +134,13 @@ export function updateControls(bus: BoardChannel): void {
     const key = input.dataset.setting!;
     const values: Record<string, string | number | boolean> = { ink: s.brush.color, size: s.brush.size, opacity: s.brush.opacity, 'board-color': s.background.color,
       fit: s.background.fit, mirror: s.background.mirror, dim: s.background.dim, positionX: s.background.positionX, positionY: s.background.positionY, smoothing: s.smoothing, pinchClose: s.pinchClose, pinchOpen: s.pinchOpen, debounceMs: s.debounceMs, autoHide: s.autoHide,
-      dominantHand: s.dominantHand, inputMode: s.inputMode, gestureSensitivity: s.gestureSensitivity, openPalmHoldMs: s.openPalmHoldMs, palmEraserSize: s.palmEraserSize, lassoCloseRadius: s.lassoCloseRadius, fistGrabRadius: s.fistGrabRadius, twoHandHoldMs: s.twoHandHoldMs, twoHandProximity: s.twoHandProximity, smartShapes: s.smartShapes, autoConvertShapes: s.autoConvertShapes, confirmationHoldMs: s.confirmationHoldMs };
+      dominantHand: s.dominantHand, inputMode: s.inputMode, recognitionMode: s.recognitionMode, lassoGesture: s.lassoGesture, gestureSensitivity: s.gestureSensitivity, openPalmHoldMs: s.openPalmHoldMs, palmEraserSize: s.palmEraserSize, lassoCloseRadius: s.lassoCloseRadius, lassoHoldMs: s.lassoHoldMs, penGripHoldMs: s.penGripHoldMs, fistGrabRadius: s.fistGrabRadius, twoHandHoldMs: s.twoHandHoldMs, twoHandProximity: s.twoHandProximity, smartShapes: s.smartShapes, autoConvertShapes: s.autoConvertShapes, confirmationHoldMs: s.confirmationHoldMs };
     if (input.type === 'checkbox') input.checked = Boolean(values[key]);
     else if (String(values[key]) !== input.value) input.value = String(values[key]);
   });
   document.querySelectorAll('[data-size]').forEach(output => { output.textContent = String(s.brush.size); });
   document.querySelectorAll<HTMLElement>('[data-image-controls]').forEach(section => { section.hidden = s.background.mode !== 'image'; });
-  document.querySelectorAll<HTMLElement>('[data-stylus-status]').forEach(status => { status.textContent = s.stylusOffset.x || s.stylusOffset.y ? 'Offset calibrated and saved locally' : 'Default virtual nib offset'; });
+  document.querySelectorAll<HTMLElement>('[data-stylus-status]').forEach(status => { status.textContent = s.stylusOffset.x || s.stylusOffset.y ? 'Estimated nib offset calibrated and saved locally' : 'Estimated virtual nib · grip clutch required'; });
   document.querySelectorAll<HTMLElement>('[data-plane-status]').forEach(status => { status.textContent = s.planePoints ? 'Calibrated · four camera-space corners saved locally' : 'Not calibrated'; });
   const selected = currentObjects(h).filter(object => bus.state.selection.includes(object.id));
   const editBar = document.getElementById('shape-edit-bar');

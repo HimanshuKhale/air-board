@@ -2,7 +2,7 @@ import type { CameraSession } from '../camera/session';
 import type { Settings } from '../core/types';
 import { cameraToCanvas } from '../core/coordinates';
 import type { PreviewMessage, TrackingResult } from '../tracking/protocol';
-import { anatomicalHandedness, palmCenter } from '../interaction/pose';
+import { anatomicalHandedness, handednessName, palmCenter } from '../interaction/pose';
 import { virtualNib } from '../interaction/stylus';
 const edges = [[0,1,2,3,4],[0,5,6,7,8],[5,9,10,11,12],[9,13,14,15,16],[13,17,18,19,20],[0,17]];
 /** Debug-only DOM/canvases. No board state, drawing pixels, persistence or network use. */
@@ -148,7 +148,10 @@ export class PipelineDebug {
       const s = track.getSettings();
       this.lastTrack = { label: track.label, width: s.width ?? 0, height: s.height ?? 0, frameRate: s.frameRate ?? 0 };
     }
-    const handedness = w.handedness.map((hand, index) => `#${index + 1}: ${hand.map(c => c.categoryName + ' ' + c.score.toFixed(3)).join(', ')}`).join('; ') || 'none';
+    const handedness = w.handedness.map((hand, index) => {
+      const raw = handednessName(hand), physical = anatomicalHandedness(hand, false, .7), score = Math.max(0, ...hand.map(category => category.score));
+      return `#${index + 1}: raw ${raw ?? 'Unknown'} -> physical ${physical ?? 'uncertain'} (${score.toFixed(3)})`;
+    }).join('; ') || 'none';
     const now = performance.now();
     const pending = d.lastSentId > d.lastResultId
       ? (d.lastReceivedId < d.lastSentId ? `Frame #${d.lastSentId} transferred; receipt not yet acknowledged (${Math.round(now - d.sentAt)} ms)` : `Frame #${d.lastSentId} received; result pending`) : 'none';
@@ -173,7 +176,7 @@ export class PipelineDebug {
       `In flight: ${pending}`,
       `Landmarks array count: ${w.landmarksArrayCount}; detected hand count: ${w.detectedHandCount}`,
       `Points per hand: [${w.landmarkCounts.join(', ')}]`,
-      `Handedness: ${handedness} (scores are handedness confidence)`,
+      `Handedness: ${handedness}`,
       'Hand detection confidence: not exposed by HandLandmarker JS; no substitute score',
       `Last worker/capture error: ${d.lastError ?? w.lastError ?? 'none'}`,
       `Last successful inference: ${w.lastSuccessAt ? new Date(w.lastSuccessAt).toISOString() : 'never'}`,

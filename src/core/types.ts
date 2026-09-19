@@ -22,6 +22,7 @@ export type DrawAction =
   | { kind: 'update'; object: BoardObject }
   | { kind: 'delete'; id: string }
   | { kind: 'replace'; strokeId: string; object: BoardObject }
+  | { kind: 'replace-many'; strokeIds: string[]; object: BoardObject }
   | { kind: 'diagram'; objects: BoardObject[] };
 export interface BackgroundSettings {
   mode: 'blank' | 'camera' | 'image'; color: string; image: string | null;
@@ -32,12 +33,14 @@ export interface Settings {
   smoothing: number; pinchClose: number; pinchOpen: number; debounceMs: number;
   paused: boolean; autoHide: boolean;
   dominantHand: 'Left' | 'Right'; gestureSensitivity: 'gentle' | 'balanced' | 'responsive';
-  inputMode: 'finger' | 'stylus'; stylusOffset: Point;
+  inputMode: 'finger' | 'pen'; stylusOffset: Point; penGripHoldMs: number;
   openPalmHoldMs: number; palmEraserSize: number;
   planePoints: Point[] | null; lassoCloseRadius: number;
   fistGrabRadius: number;
   twoHandHoldMs: number; twoHandProximity: number;
   smartShapes: boolean; autoConvertShapes: boolean;
+  recognitionMode: 'shapes' | 'digits' | 'mixed';
+  lassoGesture: 'four-fingertip' | 'index-only'; lassoHoldMs: number;
   confirmationHoldMs: number;
   shapeEditMode: 'scale' | 'points'; shapeResizeMode: 'proportional' | 'free';
 }
