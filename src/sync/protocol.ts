@@ -1,6 +1,7 @@
 import type { BoardObject, BoardState, Brush, Point, Settings } from '../core/types';
 import { appendPoint, beginStroke, clear, createDiagram, createObject, deleteObject, finishStroke, moveStrokes, redo, replaceStroke, undo, updateObject } from '../drawing/history';
 import { homographyFromQuad } from '../calibration/homography';
+import { validPolygon, vertexBounds } from '../drawing/geometry';
 export type Command =
   | { type: 'settings'; patch: Partial<Settings> }
   | { type: 'begin'; id: string; brush: Brush; point: Point }
@@ -20,12 +21,19 @@ const color = (v: unknown) => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v)
 const point = (v: unknown): v is Point => object(v) && range(v.x, 0, 1600) && range(v.y, 0, 900);
 const id = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length < 100;
 export function validBoardObject(v: unknown): v is BoardObject {
-  return object(v) && id(v.id) && ['line', 'rectangle', 'ellipse', 'triangle', 'arrow', 'text', 'connector'].includes(String(v.type)) &&
-    range(v.x, 0, 1600) && range(v.y, 0, 900) && range(v.width, 1, 1600) && range(v.height, 1, 900) &&
-    v.x + v.width <= 1600 && v.y + v.height <= 900 && color(v.color) && range(v.strokeWidth, 1, 100) &&
-    typeof v.text === 'string' && v.text.length <= 200 && !/[<>]/.test(v.text) && (v.flipY === undefined || typeof v.flipY === 'boolean') &&
-    ((v.fromId === undefined && v.toId === undefined) || (v.type === 'connector' && id(v.fromId) && id(v.toId) && v.fromId !== v.toId)) &&
-    Object.keys(v).every(key => ['id', 'type', 'x', 'y', 'width', 'height', 'color', 'strokeWidth', 'text', 'flipY', 'fromId', 'toId'].includes(key));
+  if (!object(v) || !id(v.id) || !['line', 'square', 'rectangle', 'parallelogram', 'trapezoid', 'pentagon', 'hexagon', 'polygon', 'circle', 'ellipse', 'triangle', 'arrow', 'text', 'connector'].includes(String(v.type)) ||
+    !range(v.x, 0, 1600) || !range(v.y, 0, 900) || !range(v.width, 1, 1600) || !range(v.height, 1, 900) ||
+    (v.x as number) + (v.width as number) > 1600 || (v.y as number) + (v.height as number) > 900 || !color(v.color) || !range(v.strokeWidth, 1, 100) ||
+    typeof v.text !== 'string' || v.text.length > 200 || /[<>]/.test(v.text) || (v.flipY !== undefined && typeof v.flipY !== 'boolean') ||
+    !((v.fromId === undefined && v.toId === undefined) || (v.type === 'connector' && id(v.fromId) && id(v.toId) && v.fromId !== v.toId)) ||
+    (v.regular !== undefined && typeof v.regular !== 'boolean') ||
+    !Object.keys(v).every(key => ['id', 'type', 'x', 'y', 'width', 'height', 'color', 'strokeWidth', 'text', 'flipY', 'fromId', 'toId', 'vertices', 'regular'].includes(key))) return false;
+  if (v.vertices !== undefined) {
+    if (!Array.isArray(v.vertices) || !validPolygon(v.vertices as Point[])) return false;
+    const b = vertexBounds(v.vertices as Point[]);
+    if (Math.abs(b.x - (v.x as number)) > .01 || Math.abs(b.y - (v.y as number)) > .01 || Math.abs(b.width - (v.width as number)) > .01 || Math.abs(b.height - (v.height as number)) > .01) return false;
+  }
+  return v.type !== 'polygon' || Array.isArray(v.vertices);
 }
 const planePoints = (v: unknown): v is Point[] | null => {
   if (v === null) return true;
@@ -60,6 +68,9 @@ export function validSettingsPatch(v: unknown): v is Partial<Settings> {
       case 'twoHandProximity': return range(value, 0.08, 0.5);
       case 'paused': case 'autoHide': return typeof value === 'boolean';
       case 'smartShapes': case 'autoConvertShapes': return typeof value === 'boolean';
+      case 'confirmationHoldMs': return range(value, 300, 500);
+      case 'shapeEditMode': return value === 'scale' || value === 'points';
+      case 'shapeResizeMode': return value === 'proportional' || value === 'free';
       default: return false;
     }
   });

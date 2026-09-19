@@ -1,12 +1,14 @@
-import type { Settings, Tool } from '../core/types';
+import type { Settings, ShapeKind, Tool } from '../core/types';
 import { defaults } from '../core/settings';
 import type { BoardChannel } from '../sync/channel';
 import { readLocalImage } from '../background/renderer';
+import { currentObjects } from '../drawing/history';
 export interface ControlsActions {
   startCamera(): void; stopCamera(): void; launch(): void; export(transparent: boolean): void;
   toast(message: string): void; interrupt(): void; reveal(): void;
   calibratePlane(): void; resetPlane(): void;
   calibrateStylus(): void; resetStylus(): void;
+  createShape(type: ShapeKind): void;
 }
 export function bindControls(bus: BoardChannel, actions: ControlsActions): void {
   const sendSettings = (patch: Partial<Settings>) => { actions.interrupt(); bus.send({ type: 'settings', patch }); };
@@ -17,10 +19,11 @@ export function bindControls(bus: BoardChannel, actions: ControlsActions): void 
     target.addEventListener('close', () => document.body.append(cursor), { once: true });
   };
   document.addEventListener('click', event => {
-    const button = (event.target as Element).closest<HTMLElement>('[data-action],[data-color],[data-size-preset],[data-board-color]');
+    const button = (event.target as Element).closest<HTMLElement>('[data-action],[data-color],[data-size-preset],[data-board-color],[data-create-shape]');
     if (!button) return;
     const settings = bus.state.settings;
     const action = button.dataset.action;
+    if (button.dataset.createShape) { actions.createShape(button.dataset.createShape as ShapeKind); dialog('shapes-dialog').close(); return; }
     if (button.dataset.color) sendSettings({ brush: { ...settings.brush, color: button.dataset.color } });
     if (button.dataset.sizePreset) sendSettings({ brush: { ...settings.brush, size: Number(button.dataset.sizePreset) } });
     if (button.dataset.boardColor) sendSettings({ background: { ...settings.background, mode: 'blank', color: button.dataset.boardColor } });
@@ -38,6 +41,12 @@ export function bindControls(bus: BoardChannel, actions: ControlsActions): void 
       case 'fullscreen': void toggleFullscreen(actions.toast); break;
       case 'settings': actions.interrupt(); dialog('settings-dialog').showModal(); moveCursorToDialog(dialog('settings-dialog')); actions.reveal(); break;
       case 'close-settings': dialog('settings-dialog').close(); break;
+      case 'shapes': actions.interrupt(); dialog('shapes-dialog').showModal(); moveCursorToDialog(dialog('shapes-dialog')); actions.reveal(); break;
+      case 'close-shapes': dialog('shapes-dialog').close(); break;
+      case 'shape-scale': sendSettings({ shapeEditMode: 'scale' }); break;
+      case 'shape-points': sendSettings({ shapeEditMode: 'points' }); break;
+      case 'resize-proportional': sendSettings({ shapeResizeMode: 'proportional' }); break;
+      case 'resize-free': sendSettings({ shapeResizeMode: 'free' }); break;
       case 'background': actions.interrupt(); dialog('background-dialog').showModal(); moveCursorToDialog(dialog('background-dialog')); actions.reveal(); break;
       case 'close-background': dialog('background-dialog').close(); break;
       case 'bg-blank': case 'bg-camera': case 'bg-image':
@@ -75,7 +84,7 @@ export function bindControls(bus: BoardChannel, actions: ControlsActions): void 
       case 'dominantHand': sendSettings({ dominantHand: input.value as Settings['dominantHand'] }); break;
       case 'inputMode': sendSettings({ inputMode: input.value as Settings['inputMode'] }); break;
       case 'gestureSensitivity': sendSettings({ gestureSensitivity: input.value as Settings['gestureSensitivity'] }); break;
-      case 'openPalmHoldMs': case 'palmEraserSize': case 'lassoCloseRadius': case 'fistGrabRadius': case 'twoHandHoldMs': case 'twoHandProximity': sendSettings({ [name]: Number(input.value) }); break;
+      case 'openPalmHoldMs': case 'palmEraserSize': case 'lassoCloseRadius': case 'fistGrabRadius': case 'twoHandHoldMs': case 'twoHandProximity': case 'confirmationHoldMs': sendSettings({ [name]: Number(input.value) }); break;
       case 'smoothing': case 'pinchClose': case 'pinchOpen': case 'debounceMs': sendSettings({ [name]: Number(input.value) }); break;
     }
   });
@@ -110,8 +119,8 @@ export function updateControls(bus: BoardChannel): void {
   const { settings: s, history: h } = bus.state;
   document.querySelectorAll<HTMLButtonElement>('[data-action]').forEach(button => {
     const action = button.dataset.action;
-    const pressed = action === s.brush.tool || action === 'bg-' + s.background.mode || (action === 'pause' && s.paused);
-    if (['pen', 'highlighter', 'eraser', 'bg-blank', 'bg-camera', 'bg-image', 'pause'].includes(action ?? '')) button.setAttribute('aria-pressed', String(pressed));
+    const pressed = action === s.brush.tool || action === 'bg-' + s.background.mode || (action === 'pause' && s.paused) || action === `shape-${s.shapeEditMode}` || action === `resize-${s.shapeResizeMode}`;
+    if (['pen', 'highlighter', 'eraser', 'bg-blank', 'bg-camera', 'bg-image', 'pause', 'shape-scale', 'shape-points', 'resize-proportional', 'resize-free'].includes(action ?? '')) button.setAttribute('aria-pressed', String(pressed));
     if (action === 'undo') button.disabled = !h.position && !h.active;
     if (action === 'redo') button.disabled = h.position >= h.actions.length || !!h.active;
   });
@@ -120,7 +129,7 @@ export function updateControls(bus: BoardChannel): void {
     const key = input.dataset.setting!;
     const values: Record<string, string | number | boolean> = { ink: s.brush.color, size: s.brush.size, opacity: s.brush.opacity, 'board-color': s.background.color,
       fit: s.background.fit, mirror: s.background.mirror, dim: s.background.dim, positionX: s.background.positionX, positionY: s.background.positionY, smoothing: s.smoothing, pinchClose: s.pinchClose, pinchOpen: s.pinchOpen, debounceMs: s.debounceMs, autoHide: s.autoHide,
-      dominantHand: s.dominantHand, inputMode: s.inputMode, gestureSensitivity: s.gestureSensitivity, openPalmHoldMs: s.openPalmHoldMs, palmEraserSize: s.palmEraserSize, lassoCloseRadius: s.lassoCloseRadius, fistGrabRadius: s.fistGrabRadius, twoHandHoldMs: s.twoHandHoldMs, twoHandProximity: s.twoHandProximity, smartShapes: s.smartShapes, autoConvertShapes: s.autoConvertShapes };
+      dominantHand: s.dominantHand, inputMode: s.inputMode, gestureSensitivity: s.gestureSensitivity, openPalmHoldMs: s.openPalmHoldMs, palmEraserSize: s.palmEraserSize, lassoCloseRadius: s.lassoCloseRadius, fistGrabRadius: s.fistGrabRadius, twoHandHoldMs: s.twoHandHoldMs, twoHandProximity: s.twoHandProximity, smartShapes: s.smartShapes, autoConvertShapes: s.autoConvertShapes, confirmationHoldMs: s.confirmationHoldMs };
     if (input.type === 'checkbox') input.checked = Boolean(values[key]);
     else if (String(values[key]) !== input.value) input.value = String(values[key]);
   });
@@ -128,4 +137,7 @@ export function updateControls(bus: BoardChannel): void {
   document.querySelectorAll<HTMLElement>('[data-image-controls]').forEach(section => { section.hidden = s.background.mode !== 'image'; });
   document.querySelectorAll<HTMLElement>('[data-stylus-status]').forEach(status => { status.textContent = s.stylusOffset.x || s.stylusOffset.y ? 'Offset calibrated and saved locally' : 'Default virtual nib offset'; });
   document.querySelectorAll<HTMLElement>('[data-plane-status]').forEach(status => { status.textContent = s.planePoints ? 'Calibrated · four camera-space corners saved locally' : 'Not calibrated'; });
+  const selected = currentObjects(h).filter(object => bus.state.selection.includes(object.id));
+  const editBar = document.getElementById('shape-edit-bar');
+  if (editBar) editBar.hidden = selected.length !== 1 || ['text', 'connector'].includes(selected[0]?.type);
 }

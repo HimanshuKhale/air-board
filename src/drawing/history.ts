@@ -4,7 +4,7 @@ export const MAX_POINTS = 12000;
 export interface MovePreview { ids: string[]; dx: number; dy: number }
 export interface Scene { strokes: Stroke[]; objects: BoardObject[] }
 const translatedStroke = (stroke: Stroke, dx: number, dy: number): Stroke => ({ ...stroke, brush: { ...stroke.brush }, points: stroke.points.map(point => ({ x: point.x + dx, y: point.y + dy })) });
-const translatedObject = (object: BoardObject, dx: number, dy: number): BoardObject => ({ ...object, x: object.x + dx, y: object.y + dy });
+const translatedObject = (object: BoardObject, dx: number, dy: number): BoardObject => ({ ...object, x: object.x + dx, y: object.y + dy, vertices: object.vertices?.map(point => ({ x: point.x + dx, y: point.y + dy })) });
 function commit(history: HistoryState, action: DrawAction): void {
   finishStroke(history);
   history.actions.splice(history.position);

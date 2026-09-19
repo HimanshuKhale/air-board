@@ -1,8 +1,9 @@
-import type { BoardObject, Point, Stroke } from '../core/types';
+import type { BoardObject, Point, Settings, Stroke } from '../core/types';
 import type { InteractionVisuals } from '../interaction/controller';
 import { bounds } from '../selection/geometry';
+import { shapeHandles } from '../drawing/transform';
 
-export function drawInteractionOverlay(ctx: CanvasRenderingContext2D, visuals: InteractionVisuals, strokes: Stroke[], selectedIds: string[], objects: BoardObject[] = []): void {
+export function drawInteractionOverlay(ctx: CanvasRenderingContext2D, visuals: InteractionVisuals, strokes: Stroke[], selectedIds: string[], objects: BoardObject[] = [], settings?: Settings): void {
   ctx.save();
   if (visuals.lasso.length) {
     ctx.strokeStyle = '#3b6fe8'; ctx.lineWidth = 3; ctx.setLineDash([10, 8]);
@@ -17,6 +18,16 @@ export function drawInteractionOverlay(ctx: CanvasRenderingContext2D, visuals: I
     ctx.strokeStyle = '#3b6fe8'; ctx.fillStyle = 'rgba(59,111,232,.06)'; ctx.lineWidth = 3; ctx.setLineDash([12, 8]);
     ctx.fillRect(box.minX - padding, box.minY - padding, box.maxX - box.minX + padding * 2, box.maxY - box.minY + padding * 2);
     ctx.strokeRect(box.minX - padding, box.minY - padding, box.maxX - box.minX + padding * 2, box.maxY - box.minY + padding * 2);
+  }
+  if (selectedObjects.length === 1 && !selected.length && settings && !['text', 'connector'].includes(selectedObjects[0].type)) {
+    const object = visuals.objectPreview?.id === selectedObjects[0].id ? visuals.objectPreview : selectedObjects[0];
+    ctx.setLineDash([]); ctx.lineWidth = 2;
+    for (const handle of shapeHandles(object, settings.shapeEditMode, settings.shapeResizeMode)) {
+      const radius = handle.kind === 'move' ? 8 : handle.kind === 'segment' ? 7 : 9;
+      ctx.beginPath(); ctx.arc(handle.point.x, handle.point.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = handle.kind === 'vertex' || handle.kind === 'endpoint' ? '#fff' : handle.kind === 'segment' ? '#e5ad38' : '#3b6fe8';
+      ctx.strokeStyle = '#234b7f'; ctx.fill(); ctx.stroke();
+    }
   }
   if (visuals.planeTarget !== null) {
     const targets: Point[] = [{ x: 55, y: 55 }, { x: 1545, y: 55 }, { x: 1545, y: 845 }, { x: 55, y: 845 }];

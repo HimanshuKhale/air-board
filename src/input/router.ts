@@ -4,6 +4,8 @@ import type { BoardChannel } from '../sync/channel';
 import type { PinchPhase } from './pinch';
 import { currentObjects } from '../drawing/history';
 import { nearestObject } from '../drawing/objects';
+import type { BoardObject } from '../core/types';
+import { nearestShapeHandle, shapeHandles, transformObject, type ShapeHandle } from '../drawing/transform';
 /** Mouse, touch and generic hand events share the same action protocol. */
 export class InputRouter {
   private stroke: string | null = null;
@@ -12,8 +14,10 @@ export class InputRouter {
   private mouseDown = false;
   private previousMouse: Point | null = null;
   private drag: { ids: string[]; start: Point; point: Point } | null = null;
+  private transform: { baseline: BoardObject; handle: ShapeHandle; preview: BoardObject } | null = null;
   onPointer: (client: Point, held: boolean, hand: boolean) => void = () => {};
   onActivity: () => void = () => {};
+  onObjectPreview: (object: BoardObject | null) => void = () => {};
   constructor(readonly canvas: HTMLCanvasElement, readonly bus: BoardChannel) {
     canvas.addEventListener('pointerdown', event => {
       if (event.button !== 0 || !event.isPrimary) return;
@@ -23,6 +27,14 @@ export class InputRouter {
       canvas.setPointerCapture(event.pointerId);
       const client = { x: event.clientX, y: event.clientY };
       const point = clientToCanvas(client, canvas.getBoundingClientRect(), BOARD);
+      const selected = currentObjects(bus.state.history).filter(object => bus.state.selection.includes(object.id));
+      if (selected.length === 1 && !['text', 'connector'].includes(selected[0].type)) {
+        const handle = nearestShapeHandle(shapeHandles(selected[0], bus.state.settings.shapeEditMode, bus.state.settings.shapeResizeMode), point);
+        if (handle) {
+          this.transform = { baseline: selected[0], handle, preview: selected[0] };
+          this.onObjectPreview(selected[0]); this.onPointer(client, true, false); this.onActivity(); return;
+        }
+      }
       if (event.shiftKey) {
         const hit = nearestObject(currentObjects(bus.state.history), point, 24);
         const ids = hit ? (bus.state.selection.includes(hit.id) ? bus.state.selection : [hit.id]) : [];
@@ -38,6 +50,12 @@ export class InputRouter {
       const client = { x: event.clientX, y: event.clientY };
       this.onPointer(client, this.mouseDown, false);
       if (!this.mouseDown) return;
+      if (this.transform) {
+        const point = clientToCanvas(client, canvas.getBoundingClientRect(), BOARD);
+        const preview = transformObject(this.transform.baseline, this.transform.handle, point, bus.state.settings.shapeResizeMode);
+        if (preview) { this.transform.preview = preview; this.onObjectPreview(preview); }
+        return;
+      }
       if (this.drag) { this.drag.point = clientToCanvas(client, canvas.getBoundingClientRect(), BOARD); return; }
       const samples = event.getCoalescedEvents?.();
       for (const sample of samples?.length ? samples : [event]) {
@@ -50,6 +68,10 @@ export class InputRouter {
     });
     for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(name, event => {
       this.mouseDown = false; this.previousMouse = null;
+      if (this.transform) {
+        const { baseline, preview } = this.transform; this.transform = null; this.onObjectPreview(null);
+        if (JSON.stringify(preview) !== JSON.stringify(baseline)) bus.send({ type: 'update-object', object: preview });
+      }
       if (this.drag) {
         const { ids, start, point } = this.drag; this.drag = null;
         if (Math.hypot(point.x - start.x, point.y - start.y) >= 0.5) bus.send({ type: 'move', ids, dx: point.x - start.x, dy: point.y - start.y });
@@ -88,7 +110,7 @@ export class InputRouter {
   heartbeat(): void {
     if (this.mouseDown && this.stroke && this.previousMouse) this.move(this.previousMouse);
   }
-  end(): void { this.endStroke(); this.handTarget = null; this.mouseDown = false; this.previousMouse = null; }
+  end(): void { this.endStroke(); this.handTarget = null; this.mouseDown = false; this.previousMouse = null; this.drag = null; this.transform = null; this.onObjectPreview(null); }
   hand(point: Point, phase: PinchPhase): void {
     if (this.mouseDown) return;
     const client = canvasToClient(point, this.canvas.getBoundingClientRect(), BOARD);

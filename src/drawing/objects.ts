@@ -2,11 +2,12 @@ import type { BoardObject, Point } from '../core/types';
 import { distanceToSegment, pointInPolygon } from '../selection/geometry';
 
 export function objectOutline(object: BoardObject): Point[] {
+  if (object.vertices?.length) return object.vertices.map(point => ({ ...point }));
   const { x, y, width: w, height: h } = object;
   switch (object.type) {
     case 'line': case 'arrow': case 'connector': return object.flipY ? [{ x, y: y + h }, { x: x + w, y }] : [{ x, y }, { x: x + w, y: y + h }];
     case 'triangle': return [{ x: x + w / 2, y }, { x: x + w, y: y + h }, { x, y: y + h }];
-    case 'ellipse': return Array.from({ length: 25 }, (_, i) => ({ x: x + w / 2 + Math.cos(i * Math.PI / 12) * w / 2, y: y + h / 2 + Math.sin(i * Math.PI / 12) * h / 2 }));
+    case 'circle': case 'ellipse': return Array.from({ length: 25 }, (_, i) => ({ x: x + w / 2 + Math.cos(i * Math.PI / 12) * w / 2, y: y + h / 2 + Math.sin(i * Math.PI / 12) * h / 2 }));
     default: return [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }];
   }
 }
@@ -60,7 +61,7 @@ export function paintObject(ctx: CanvasRenderingContext2D, object: BoardObject):
     ctx.textBaseline = 'middle'; ctx.fillText(object.text, x, y + h / 2, w);
   } else {
     ctx.beginPath();
-    if (object.type === 'ellipse') ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    if (object.type === 'circle' || object.type === 'ellipse') ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
     else {
       ctx.moveTo(outline[0].x, outline[0].y);
       for (const point of outline.slice(1)) ctx.lineTo(point.x, point.y);

@@ -30,12 +30,12 @@ function pose(kind: 'open' | 'index' | 'fist' | 'ambiguous'): Point[] {
 const result = (points: Point[], name: 'Left' | 'Right' = 'Right'): TrackingResult => ({
   kind: 'result', frameId: 1, status: 'hands', landmarks: points, allLandmarks: [points], duration: 1, timestamp: 1,
   stats: { framesReceived: 1, inferenceCalls: 1, successfulInferences: 1, failedFrames: 0, frameId: 1, inputWidth: 1000, inputHeight: 1000,
-    duration: 1, landmarksArrayCount: 1, detectedHandCount: 1, landmarkCounts: [21], handedness: [[{ categoryName: name, score: 0.99 }]], lastSuccessAt: 1, lastError: null, threshold: 0.65 },
+    duration: 1, landmarksArrayCount: 1, detectedHandCount: 1, landmarkCounts: [21], handedness: [[{ categoryName: name === 'Right' ? 'Left' : 'Right', score: 0.99 }]], lastSuccessAt: 1, lastError: null, threshold: 0.65 },
 });
 const result2 = (right: Point[], left: Point[]): TrackingResult => {
   const value = result(right);
   value.allLandmarks = [right, left]; value.stats.detectedHandCount = 2; value.stats.landmarksArrayCount = 2; value.stats.landmarkCounts = [21, 21];
-  value.stats.handedness = [[{categoryName:'Right',score:.99}],[{categoryName:'Left',score:.98}]];
+  value.stats.handedness = [[{categoryName:'Left',score:.99}],[{categoryName:'Right',score:.98}]];
   return value;
 };
 
@@ -160,6 +160,15 @@ describe('two-hand global control', () => {
     controller.update(result2(a,b),size,1600,state.settings); controller.update(result2(a,b),size,2100,state.settings);
     expect(state.settings.paused).toBe(false);
     expect(commands.filter(c=>c.type==='settings' && 'paused' in c.patch)).toHaveLength(2);
+  });
+  it('does not toggle pause while a left-hand confirmation request owns the two-hand pose', () => {
+    const state = initialState(), commands: Command[] = [], confirmations: string[] = [];
+    const controller = new InteractionController({ send(c) { commands.push(c); reduce(state, c); }, routePinch() {}, endPinch() {}, map: p => ({ x: p.x * 1600, y: p.y * 900 }), showPointer() {}, getState: () => state, toast() {}, confirmationPending: () => true, confirmationPose: pose => confirmations.push(pose) });
+    const right = pose('open'), left = right.map(point => ({ x: point.x + .05, y: point.y }));
+    controller.update(result2(right, left), size, 0, state.settings);
+    controller.update(result2(right, left), size, 700, state.settings);
+    expect(commands.some(command => command.type === 'settings' && 'paused' in command.patch)).toBe(false);
+    expect(controller.diagnostics.twoHandClose).toBe(false); expect(confirmations.length).toBeGreaterThan(0);
   });
 });
 

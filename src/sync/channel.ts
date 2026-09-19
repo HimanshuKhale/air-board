@@ -92,6 +92,9 @@ export class BoardChannel {
       this.state = m.state; this.epoch = m.epoch; this.revision = m.revision as number;
       this.state.settings.smartShapes ??= true;
       this.state.settings.autoConvertShapes ??= false;
+      this.state.settings.confirmationHoldMs ??= 400;
+      this.state.settings.shapeEditMode ??= 'scale';
+      this.state.settings.shapeResizeMode ??= 'proportional';
       this.applied = new Set(m.applied as string[]);
       for (const id of this.applied) this.unacknowledged.delete(id);
       this.ready = true; this.onChange(); this.flush();

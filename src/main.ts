@@ -27,6 +27,8 @@ import type { BoardObject } from './core/types';
 import { SpeechController } from './ai/speech';
 import { parseCommand } from './ai/commands';
 import { executeIntent } from './ai/execute';
+import { ConfirmationMachine, type ConfirmationDecision } from './interaction/confirmation';
+import { makeShape } from './drawing/geometry';
 
 const isPresentation = location.pathname === '/present';
 document.body.classList.toggle('is-presentation', isPresentation);
@@ -52,6 +54,8 @@ const camera = new CameraSession(video, bus, isPresentation ? 'Presentation' : '
 const pipelineDebug = new PipelineDebug(camera);
 const input = new InputRouter(drawing.canvas, bus);
 const planeMapper = new PlaneMapper();
+let pendingShape: { requestId: string; strokeId: string; object: BoardObject; confidence: number } | null = null;
+const confirmation = new ConfirmationMachine(bus.state.settings.confirmationHoldMs);
 const interactions = new InteractionController({
   send: command => bus.send(command),
   routePinch: (point, phase) => input.hand(point, phase),
@@ -62,6 +66,13 @@ const interactions = new InteractionController({
   },
   getState: () => bus.state,
   previewMove: preview => drawing.setMovePreview(preview),
+  previewObject: preview => drawing.setObjectPreview(preview),
+  confirmationPending: () => !!confirmation.request,
+  confirmationPose: (pose, confidence, now) => {
+    const result = confirmation.observe(pose, confidence, now);
+    if (result) resolveShapeDecision(result.id, result.decision);
+  },
+  confirmationInterrupted: () => confirmation.interrupt(),
   toast,
   showPointer: (point, diameter, held, label) => {
     const client = canvasToClient(point, drawing.canvas.getBoundingClientRect(), BOARD);
@@ -117,15 +128,31 @@ el('undo-ai').addEventListener('click', () => {
   if (lastAiActionPosition < 0 || bus.state.history.position !== lastAiActionPosition) { aiStatus('Undo newer board actions first, then try Undo Last AI Action.'); return; }
   bus.send({ type: 'undo' }); lastAiActionPosition = -1; aiStatus('Undid last AI action.');
 });
-let pendingShape: { strokeId: string; object: BoardObject; confidence: number } | null = null;
-let shapeTimer = 0;
-function dismissShape(): void { pendingShape = null; clearTimeout(shapeTimer); el('shape-suggestion').hidden = true; }
-function acceptShape(): void {
-  const candidate = pendingShape; dismissShape();
-  if (candidate) bus.send({ type: 'replace-stroke', strokeId: candidate.strokeId, object: candidate.object });
+function clearShapePrompt(cancel = false): void {
+  if (cancel) confirmation.cancel();
+  pendingShape = null; el('shape-suggestion').hidden = true;
 }
-el('shape-convert').addEventListener('click', acceptShape);
-el('shape-keep').addEventListener('click', dismissShape);
+function resolveShapeDecision(requestId: string, decision: ConfirmationDecision): void {
+  const candidate = pendingShape;
+  if (!candidate || candidate.requestId !== requestId) return;
+  clearShapePrompt();
+  if (decision === 'yes' || decision === 'timeout' && bus.leader && bus.state.settings.autoConvertShapes && candidate.confidence >= .9)
+    bus.send({ type: 'replace-stroke', strokeId: candidate.strokeId, object: candidate.object });
+}
+function decideShape(decision: 'yes' | 'no'): void {
+  const request = confirmation.request;
+  if (!request) return;
+  const result = confirmation.settle(request.id, decision);
+  if (result) resolveShapeDecision(result.id, result.decision);
+}
+el('shape-convert').addEventListener('click', () => decideShape('yes'));
+el('shape-keep').addEventListener('click', () => decideShape('no'));
+window.addEventListener('keydown', event => {
+  if (!pendingShape || (event.target as HTMLElement).closest('input,select,textarea,[contenteditable]')) return;
+  const key = event.key.toLowerCase();
+  if (key === 'y' || key === 'enter') { event.preventDefault(); decideShape('yes'); }
+  if (key === 'n' || key === 'escape') { event.preventDefault(); decideShape('no'); }
+});
 const cursor = el<HTMLDivElement>('hand-cursor');
 function toast(message: string): void {
   const target = el('toast'); target.textContent = message; target.classList.add('visible');
@@ -133,7 +160,7 @@ function toast(message: string): void {
 }
 function reveal(): void { controlsUntil = performance.now() + 5500; el('presentation-controls')?.classList.remove('controls-hidden'); }
 function releaseHand(): void {
-  hand = null; interactions.reset(); input.endHand(); camera.hand = false;
+  hand = null; interactions.reset(); input.endHand(); confirmation.interrupt(); camera.hand = false;
   if (cursor.classList.contains('from-hand')) cursor.hidden = true;
   el('hand-dot')?.classList.remove('active');
 }
@@ -183,23 +210,31 @@ bindControls(bus, {
   resetPlane: () => { interactions.resetPlaneCalibration(); planeMapper.reset(); },
   calibrateStylus: () => interactions.startStylusCalibration(),
   resetStylus: () => interactions.resetStylusCalibration(),
+  createShape: type => {
+    const count = currentObjects(bus.state.history).length;
+    const width = ['line', 'arrow'].includes(type) ? 240 : type === 'square' || type === 'circle' ? 150 : 220;
+    const height = ['line', 'arrow'].includes(type) ? 100 : type === 'square' || type === 'circle' ? 150 : 140;
+    const x = 90 + count % 5 * 270, y = 90 + Math.floor(count / 5) % 4 * 185;
+    const object = makeShape(type, crypto.randomUUID(), x, y, width, height, bus.state.settings.brush.color, Math.max(2, bus.state.settings.brush.size));
+    bus.send({ type: 'create-object', object }); bus.send({ type: 'select', ids: [object.id] });
+  },
 });
 bus.onChange = (command, requestId) => {
   drawing.invalidate(!command || !['begin', 'point'].includes(command.type));
   if (requestId && aiRequestIds.delete(requestId) && command && !['select', 'undo', 'redo'].includes(command.type)) lastAiActionPosition = bus.state.history.position;
-  if (command?.type === 'replace-stroke' && pendingShape?.strokeId === command.strokeId) dismissShape();
+  if (command?.type === 'replace-stroke' && pendingShape?.strokeId === command.strokeId) clearShapePrompt(true);
   if (command?.type === 'end' && bus.state.settings.smartShapes) {
     const action = bus.state.history.actions.at(bus.state.history.position - 1);
     if (action?.kind === 'stroke' && action.stroke.id === command.id) {
       const match = recognizeStroke(action.stroke);
       if (match) {
-        dismissShape(); pendingShape = { strokeId: action.stroke.id, ...match };
+        clearShapePrompt(true);
+        const requestId = crypto.randomUUID();
+        pendingShape = { requestId, strokeId: action.stroke.id, ...match };
+        confirmation.setHoldMs(bus.state.settings.confirmationHoldMs);
+        confirmation.begin(requestId, `Clean ${match.object.type}`, performance.now());
         el('shape-suggestion-label').textContent = `Clean ${match.object.type}?`;
         el('shape-suggestion').hidden = false;
-        shapeTimer = window.setTimeout(() => {
-          if (bus.leader && bus.state.settings.autoConvertShapes && match.confidence >= 0.9) acceptShape();
-          else dismissShape();
-        }, 3000);
       }
     }
   }
@@ -262,6 +297,7 @@ input.onPointer = (client, held, fromHand) => {
   if (client.y < rect.top + 65) reveal();
 };
 input.onActivity = reveal;
+input.onObjectPreview = preview => drawing.setObjectPreview(preview);
 document.addEventListener('pointermove', event => {
   const rect = drawing.canvas.getBoundingClientRect();
   if (event.clientY < rect.top + 65 || (event.target as Element).closest('.presentation-controls')) reveal();
@@ -283,8 +319,15 @@ function render(now: number): void {
   if (backgroundDirty || (s.background.mode === 'camera' && camera.camera.stream)) { background.draw(backgroundContext, s.background); backgroundDirty = false; }
   drawing.render(bus.state.history);
   overlayContext.clearRect(0, 0, BOARD.width, BOARD.height);
-  drawInteractionOverlay(overlayContext, interactions.visuals, currentStrokes(bus.state.history, interactions.visuals.movePreview), bus.state.selection, currentObjects(bus.state.history, interactions.visuals.movePreview));
+  drawInteractionOverlay(overlayContext, interactions.visuals, currentStrokes(bus.state.history, interactions.visuals.movePreview), bus.state.selection, currentObjects(bus.state.history, interactions.visuals.movePreview), s);
   if (pendingShape) { overlayContext.save(); overlayContext.globalAlpha = 0.55; paintObject(overlayContext, pendingShape.object); overlayContext.restore(); }
+  const confirmationResult = confirmation.tick(now);
+  if (confirmationResult) resolveShapeDecision(confirmationResult.id, confirmationResult.decision);
+  if (pendingShape) {
+    el('shape-countdown').textContent = `${(confirmation.remaining(now) / 1000).toFixed(1)}s`;
+    const progress = confirmation.progress;
+    el('shape-gesture-feedback').textContent = progress.pose === 'CONFIRM_YES' ? `V held ${Math.round(progress.heldMs)} ms` : progress.pose === 'CONFIRM_NO' ? `Shaka held ${Math.round(progress.heldMs)} ms` : 'Show V to convert or shaka to keep ink';
+  }
   if (hand && now - lastTracking > 250) releaseHand();
   if (now - lastPointerTime > 1800) cursor.hidden = true;
   const calibrating = el<HTMLDialogElement>('settings-dialog').open;

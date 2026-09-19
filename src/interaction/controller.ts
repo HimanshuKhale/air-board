@@ -5,7 +5,7 @@ import { GestureController } from '../input/gesture';
 import type { HandPointer } from '../input/gesture';
 import type { PinchPhase } from '../input/pinch';
 import { ExponentialFilter } from '../input/filter';
-import { classifyPose, handednessName, palmCenter, type StaticGesture } from './pose';
+import { anatomicalHandedness, classifyConfirmationPose, classifyPose, palmCenter, type ConfirmationPose, type StaticGesture } from './pose';
 import { PoseStabilizer } from './temporal';
 import { currentObjects, currentStrokes } from '../drawing/history';
 import { nearestObject, selectObjects } from '../drawing/objects';
@@ -14,14 +14,17 @@ import type { MovePreview } from '../drawing/history';
 import { TwoHandToggle } from './two-hand';
 import { applyStylusOffset, calibrateStylusOffset, virtualNib } from './stylus';
 import { homographyFromQuad } from '../calibration/homography';
+import { nearestShapeHandle, shapeHandles, transformObject, type ShapeHandle } from '../drawing/transform';
+import type { BoardObject } from '../core/types';
 
-export type InteractionMode = 'hover' | 'write' | 'erase' | 'lasso' | 'drag' | 'plane-calibration' | 'stylus-calibration';
+export type InteractionMode = 'hover' | 'write' | 'erase' | 'lasso' | 'drag' | 'shape-transform' | 'plane-calibration' | 'stylus-calibration';
 export interface InteractionDiagnostics {
   dominantHand: 'Left' | 'Right'; detectedHands: string[]; instantaneousGesture: StaticGesture;
   stableGesture: StaticGesture; gestureEnterMs: number; interaction: InteractionMode;
   handControl: 'enabled' | 'paused'; rawPoint: Point | null; mappedPoint: Point | null;
   lassoActive: boolean; selectedStrokeCount: number; grabbedStrokeId: string | null; planeCalibrationActive: boolean; planeCalibrationValid: boolean;
   inputMode: Settings['inputMode']; virtualNibPoint: Point | null; twoHandClose: boolean; twoHandHeldMs: number;
+  confirmationGesture: ConfirmationPose; confirmationConfidence: number;
 }
 export interface InteractionHooks {
   send(command: Command): void;
@@ -32,8 +35,12 @@ export interface InteractionHooks {
   getState(): BoardState;
   toast(message: string): void;
   previewMove?(preview: MovePreview | null): void;
+  previewObject?(preview: BoardObject | null): void;
+  confirmationPending?(): boolean;
+  confirmationPose?(pose: ConfirmationPose, confidence: number, now: number): void;
+  confirmationInterrupted?(): void;
 }
-export interface InteractionVisuals { lasso: Point[]; lassoStart: Point | null; planeTarget: number | null; planeCaptured: Point[]; movePreview: MovePreview | null; stylusTarget: boolean }
+export interface InteractionVisuals { lasso: Point[]; lassoStart: Point | null; planeTarget: number | null; planeCaptured: Point[]; movePreview: MovePreview | null; objectPreview: BoardObject | null; stylusTarget: boolean }
 
 export class InteractionController {
   pointer: HandPointer | null = null;
@@ -41,9 +48,9 @@ export class InteractionController {
     dominantHand: 'Right', detectedHands: [], instantaneousGesture: 'neutral', stableGesture: 'neutral', gestureEnterMs: 0,
     interaction: 'hover', handControl: 'enabled', rawPoint: null, mappedPoint: null,
     lassoActive: false, selectedStrokeCount: 0, grabbedStrokeId: null, planeCalibrationActive: false, planeCalibrationValid: false,
-    inputMode: 'finger', virtualNibPoint: null, twoHandClose: false, twoHandHeldMs: 0,
+    inputMode: 'finger', virtualNibPoint: null, twoHandClose: false, twoHandHeldMs: 0, confirmationGesture: 'neutral', confirmationConfidence: 0,
   };
-  readonly visuals: InteractionVisuals = { lasso: [], lassoStart: null, planeTarget: null, planeCaptured: [], movePreview: null, stylusTarget: false };
+  readonly visuals: InteractionVisuals = { lasso: [], lassoStart: null, planeTarget: null, planeCaptured: [], movePreview: null, objectPreview: null, stylusTarget: false };
   private gesture = new GestureController();
   private pose = new PoseStabilizer();
   private twoHand = new TwoHandToggle();
@@ -60,6 +67,7 @@ export class InteractionController {
   private planeCapture: Point[] | null = null;
   private drag: { ids: string[]; start: Point; current: Point } | null = null;
   private stylusCapture = false;
+  private shapeTransform: { baseline: BoardObject; handle: ShapeHandle; preview: BoardObject } | null = null;
   constructor(private hooks: InteractionHooks) {}
   update(result: TrackingResult, size: Size, now: number, settings: Settings): void {
     this.diagnostics.dominantHand = settings.dominantHand;
@@ -67,9 +75,19 @@ export class InteractionController {
     this.diagnostics.inputMode = settings.inputMode;
     this.diagnostics.selectedStrokeCount = this.hooks.getState().selection.length;
     this.diagnostics.planeCalibrationValid = !!settings.planePoints;
-    const hands = result.allLandmarks.map((landmarks, index) => ({ landmarks, categories: result.stats.handedness[index] ?? [], name: handednessName(result.stats.handedness[index] ?? []) }));
+    const hands = result.allLandmarks.map((landmarks, index) => ({ landmarks, categories: result.stats.handedness[index] ?? [], name: anatomicalHandedness(result.stats.handedness[index] ?? [], false, .7) }));
     this.diagnostics.detectedHands = hands.map(hand => hand.name ? `${hand.name} ${(hand.categories[0]?.score ?? 0).toFixed(2)}` : 'Unknown');
-    const toggleHandControl = this.twoHand.update(hands.map(hand => hand.landmarks), size, now, settings.twoHandHoldMs, settings.twoHandProximity);
+    const confirmationPending = this.hooks.confirmationPending?.() ?? false;
+    if (confirmationPending) {
+      const left = hands.find(hand => hand.name === 'Left' && hand.landmarks.length === 21);
+      const confirmation = left ? classifyConfirmationPose(left.landmarks, size) : { gesture: 'neutral' as const, confidence: 0 };
+      this.diagnostics.confirmationGesture = confirmation.gesture; this.diagnostics.confirmationConfidence = confirmation.confidence;
+      if (left) this.hooks.confirmationPose?.(confirmation.gesture, confirmation.confidence, now); else this.hooks.confirmationInterrupted?.();
+      this.twoHand.reset();
+    } else {
+      this.diagnostics.confirmationGesture = 'neutral'; this.diagnostics.confirmationConfidence = 0;
+    }
+    const toggleHandControl = confirmationPending ? false : this.twoHand.update(hands.map(hand => hand.landmarks), size, now, settings.twoHandHoldMs, settings.twoHandProximity);
     this.diagnostics.twoHandClose = this.twoHand.state.close; this.diagnostics.twoHandHeldMs = this.twoHand.state.heldMs;
     if (toggleHandControl) {
       this.cancelActive(); this.cancelCalibrations();
@@ -80,7 +98,8 @@ export class InteractionController {
       return;
     }
     if (settings.paused) { this.cancelActive(); this.diagnostics.handControl = 'paused'; return; }
-    const dominant = hands.find(hand => hand.name === settings.dominantHand && hand.landmarks.length === 21);
+    const activeHand = confirmationPending ? 'Right' : settings.dominantHand;
+    const dominant = hands.find(hand => hand.name === activeHand && hand.landmarks.length === 21);
     if (!dominant) { this.cancelActive(); return; }
     if (this.lastDominant && this.lastDominant !== dominant.name) this.reset();
     this.lastDominant = dominant.name;
@@ -119,6 +138,16 @@ export class InteractionController {
       }
       return;
     }
+    if (this.shapeTransform) {
+      if (pointer.phase === 'pinchEnd' || pointer.phase === 'hover') this.endShapeTransform(pointer.phase === 'pinchEnd');
+      else {
+        const preview = transformObject(this.shapeTransform.baseline, this.shapeTransform.handle, mapped, settings.shapeResizeMode);
+        if (preview) { this.shapeTransform.preview = preview; this.visuals.objectPreview = preview; this.hooks.previewObject?.(preview); }
+        this.diagnostics.interaction = 'shape-transform'; this.hooks.showPointer(mapped, 22, true, 'S');
+      }
+      return;
+    }
+    if (pointer.phase === 'pinchStart' && this.beginShapeTransform(mapped, settings)) return;
     // Active lasso and eraser interactions retain ownership until their gesture is released.
     if (this.lasso.length) {
       if (classification.gesture !== 'index-only' || now - this.lassoAt > 8000) this.cancelLasso();
@@ -286,8 +315,23 @@ export class InteractionController {
     if (commit && Math.hypot(dx, dy) >= 0.5) this.hooks.send({ type: 'move', ids: drag.ids, dx, dy });
     this.blockedPose = 'fist';
   }
+  private beginShapeTransform(point: Point, settings: Settings): boolean {
+    const state = this.hooks.getState(), selected = currentObjects(state.history).filter(object => state.selection.includes(object.id));
+    if (selected.length !== 1 || ['text', 'connector'].includes(selected[0].type)) return false;
+    const handle = nearestShapeHandle(shapeHandles(selected[0], settings.shapeEditMode, settings.shapeResizeMode), point);
+    if (!handle) return false;
+    this.hooks.endPinch();
+    this.shapeTransform = { baseline: selected[0], handle, preview: selected[0] };
+    this.visuals.objectPreview = selected[0]; this.hooks.previewObject?.(selected[0]);
+    this.diagnostics.interaction = 'shape-transform'; this.hooks.showPointer(point, 22, true, 'S'); return true;
+  }
+  private endShapeTransform(commit: boolean): void {
+    const transform = this.shapeTransform; this.shapeTransform = null; this.visuals.objectPreview = null; this.hooks.previewObject?.(null);
+    this.diagnostics.interaction = 'hover';
+    if (commit && transform && JSON.stringify(transform.baseline) !== JSON.stringify(transform.preview)) this.hooks.send({ type: 'update-object', object: transform.preview });
+  }
   cancelActive(): void {
-    this.endDrag(false); this.endErase(); this.cancelLasso(); this.hooks.endPinch(); this.gesture.reset(); this.pose.reset(); this.palmFilter.reset(); this.fistFilter.reset(); this.lastDominant = null; this.blockedPose = null;
+    this.endShapeTransform(false); this.endDrag(false); this.endErase(); this.cancelLasso(); this.hooks.endPinch(); this.gesture.reset(); this.pose.reset(); this.palmFilter.reset(); this.fistFilter.reset(); this.lastDominant = null; this.blockedPose = null;
     this.pointer = null;
     Object.assign(this.diagnostics, { instantaneousGesture: 'neutral', stableGesture: 'neutral', gestureEnterMs: 0, interaction: 'hover', rawPoint: null, mappedPoint: null, virtualNibPoint: null, grabbedStrokeId: null });
   }

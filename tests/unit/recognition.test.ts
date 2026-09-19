@@ -24,3 +24,15 @@ it('avoids short handwriting and open A, D, and arrow-like scribbles', () => {
   expect(recognizeStroke(ink(letterA))).toBeNull();
   expect(recognizeStroke(ink(scribble))).toBeNull();
 });
+it('recognizes extended closed polygon families with editable vertices', () => {
+  const fixtures: Array<[Point[], string]> = [
+    [[{ x: 100, y: 100 }, { x: 300, y: 100 }, { x: 300, y: 300 }, { x: 100, y: 300 }, { x: 100, y: 100 }], 'square'],
+    [[{ x: 150, y: 100 }, { x: 370, y: 100 }, { x: 320, y: 280 }, { x: 100, y: 280 }, { x: 150, y: 100 }], 'parallelogram'],
+    [[{ x: 150, y: 100 }, { x: 310, y: 100 }, { x: 370, y: 280 }, { x: 90, y: 280 }, { x: 150, y: 100 }], 'trapezoid'],
+    [[{ x: 230, y: 70 }, { x: 370, y: 175 }, { x: 315, y: 340 }, { x: 145, y: 340 }, { x: 90, y: 175 }, { x: 230, y: 70 }], 'pentagon'],
+  ];
+  for (const [vertices, expected] of fixtures) {
+    const match = recognizeStroke(ink(interpolate(vertices)));
+    expect(match?.object.type).toBe(expected); expect(match?.object.vertices?.length).toBe(vertices.length - 1);
+  }
+});

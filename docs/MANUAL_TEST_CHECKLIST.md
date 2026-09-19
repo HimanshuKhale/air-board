@@ -92,3 +92,14 @@ Record laptop/CPU, Windows version, Chrome/Edge version, webcam, lighting, date,
 - [ ] Disconnect the speech service or internet mid-session. Confirm board content remains, pen and webcam control continue, and no cloud request contains camera frames, screenshots or the whole board.
 - [ ] Save board and transparent PNGs containing native shapes and labels. Verify Presentation output and your actual screen-sharing setup.
 - [ ] Review provider usage and spending limit after a live trial. Automatic mode should remain unavailable in the UI.
+
+## Gesture approval and advanced shape editing
+
+- [ ] Draw a recognized shape. Confirm the approval window lasts 8 seconds, shows a live countdown, and mouse/touch YES and NO work.
+- [ ] During the prompt, hold an anatomical left-hand V sign for the configured 300–500 ms. Confirm conversion fires once. Keep holding through the next prompt and confirm it does not fire until the hand returns to neutral.
+- [ ] Hold a left-hand shaka during a prompt. Confirm the rough stroke remains. Try ambiguous poses, low handedness confidence, tracking loss, focus loss, timeout, and fast alternating gestures; no stale request may settle.
+- [ ] Bring both hands together during a prompt. Confirm the left-hand answer remains available and pause/resume does not toggle. Confirm normal two-hand pause returns after the prompt closes.
+- [ ] Create each palette shape: triangle, square, rectangle, parallelogram, trapezoid, pentagon, hexagon, arbitrary polygon, circle, ellipse, line and arrow. Confirm Studio/Presentation synchronization and PNG export.
+- [ ] Select one shape. Drag Scale handles with mouse/touch and right-hand pinch in Proportional and Free modes. Confirm live preview, board/minimum bounds, one Undo per completed transform, and cancellation on tracking loss.
+- [ ] In Points mode, move polygon vertices and edge handles. Confirm invalid self-intersections are rejected. Move line/arrow endpoints and circle/ellipse radius handles.
+- [ ] Select multiple objects and fist-drag or Shift-drag the group. Confirm one move action and correct undo/redo round trip.

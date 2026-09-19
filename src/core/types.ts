@@ -5,12 +5,14 @@ export type Tool = 'pen' | 'highlighter' | 'eraser';
 export type Fit = 'contain' | 'cover' | 'stretch';
 export interface Brush { tool: Tool; color: string; size: number; opacity: number }
 export interface Stroke { id: string; brush: Brush; points: Point[] }
-export type ShapeKind = 'line' | 'rectangle' | 'ellipse' | 'triangle' | 'arrow' | 'text' | 'connector';
+export type ShapeKind = 'line' | 'square' | 'rectangle' | 'parallelogram' | 'trapezoid' | 'pentagon' | 'hexagon' | 'polygon' | 'circle' | 'ellipse' | 'triangle' | 'arrow' | 'text' | 'connector';
 /** All geometry uses the fixed logical board. Lines and connectors may descend with flipY. */
 export interface BoardObject {
   id: string; type: ShapeKind; x: number; y: number; width: number; height: number;
   color: string; strokeWidth: number; text: string; flipY?: boolean;
   fromId?: string; toId?: string;
+  /** Absolute logical-board vertices preserve irregular polygons during free editing. */
+  vertices?: Point[]; regular?: boolean;
 }
 export type DrawAction =
   | { kind: 'stroke'; stroke: Stroke }
@@ -36,6 +38,8 @@ export interface Settings {
   fistGrabRadius: number;
   twoHandHoldMs: number; twoHandProximity: number;
   smartShapes: boolean; autoConvertShapes: boolean;
+  confirmationHoldMs: number;
+  shapeEditMode: 'scale' | 'points'; shapeResizeMode: 'proportional' | 'free';
 }
 export interface HistoryState { actions: DrawAction[]; position: number; active: Stroke | null }
 export interface BoardState { settings: Settings; history: HistoryState; selection: string[] }

@@ -4,6 +4,7 @@ import { currentObjects } from '../drawing/history';
 import type { BoardChannel } from '../sync/channel';
 import { composeDiagram } from './plan';
 import type { Intent } from './commands';
+import { makeShape } from '../drawing/geometry';
 
 function matches(target: string, object: BoardObject): boolean {
   const name = target.replace(/^(the|this|ye|is)\s+/, '').trim();
@@ -45,7 +46,7 @@ export function executeIntent(bus: BoardChannel, intent: Intent, requestId: stri
       const labels = Array.from({ length: intent.count }, (_, i) => intent.count === 1 ? 'Shape' : `Shape ${i + 1}`);
       const nodes = labels.map((label, i) => ({ id: `node_${i}`, type: intent.type === 'ellipse' || intent.type === 'triangle' ? intent.type : 'rectangle' as const, label }));
       const plan = { version: 1 as const, operation: 'create_diagram' as const, layout: 'horizontal' as const, nodes, edges: [] };
-      const objects = composeDiagram(plan, bus.state.history, color).map(object => ({ ...object, type: intent.type, text: '' }));
+      const objects = composeDiagram(plan, bus.state.history, color).map(object => makeShape(intent.type, object.id, object.x, object.y, object.width, object.height, color, object.strokeWidth));
       send({ type: 'create-diagram', objects, requestId, baseRevision: bus.currentRevision }); return `Created ${intent.count} ${intent.type}${intent.count > 1 ? 's' : ''}.`;
     }
     case 'select': { const object = resolve(bus, intent.target); send({ type: 'select', ids: [object.id] }); return `Selected ${object.text || object.type}.`; }

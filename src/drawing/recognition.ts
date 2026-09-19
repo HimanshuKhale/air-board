@@ -1,6 +1,7 @@
 import type { BoardObject, Point, Stroke } from '../core/types';
 import { bounds, distanceToSegment, pathLength } from '../selection/geometry';
 import { objectOutline } from './objects';
+import { validPolygon, vertexBounds } from './geometry';
 
 export interface Recognition { object: BoardObject; confidence: number }
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -28,6 +29,44 @@ function polygonError(points: Point[], outline: Point[], closed: boolean, scale:
 function cornersCovered(points: Point[], corners: Point[], scale: number): boolean {
   return corners.every(corner => Math.min(...points.map(point => distance(point, corner))) < scale * 0.1);
 }
+function rdp(points: Point[], epsilon: number): Point[] {
+  if (points.length <= 2) return points;
+  let max = 0, index = 0;
+  for (let i = 1; i < points.length - 1; i++) { const d = distanceToSegment(points[i], points[0], points.at(-1)!); if (d > max) { max = d; index = i; } }
+  if (max <= epsilon) return [points[0], points.at(-1)!];
+  return [...rdp(points.slice(0, index + 1), epsilon).slice(0, -1), ...rdp(points.slice(index), epsilon)];
+}
+function closedCorners(points: Point[], epsilon: number): Point[] {
+  const farthest = points.reduce((best, point, i) => distance(point, points[0]) > distance(points[best], points[0]) ? i : best, 1);
+  const result = [...rdp(points.slice(0, farthest + 1), epsilon).slice(0, -1), ...rdp(points.slice(farthest), epsilon)];
+  if (distance(result[0], result.at(-1)!) <= epsilon * 2) result.pop();
+  return result;
+}
+const edgeAngle = (a: Point, b: Point) => Math.atan2(b.y - a.y, b.x - a.x);
+const parallel = (a: number, b: number) => Math.abs(Math.sin(a - b)) < .22;
+function rightAngle(a: Point, b: Point, c: Point): boolean {
+  const u = { x: a.x - b.x, y: a.y - b.y }, v = { x: c.x - b.x, y: c.y - b.y };
+  return Math.abs((u.x * v.x + u.y * v.y) / Math.max(1, Math.hypot(u.x, u.y) * Math.hypot(v.x, v.y))) < .22;
+}
+function interiorAngle(a: Point, b: Point, c: Point): number {
+  const u = { x: a.x - b.x, y: a.y - b.y }, v = { x: c.x - b.x, y: c.y - b.y };
+  const cosine = (u.x * v.x + u.y * v.y) / Math.max(1, Math.hypot(u.x, u.y) * Math.hypot(v.x, v.y));
+  return Math.acos(Math.max(-1, Math.min(1, cosine))) * 180 / Math.PI;
+}
+function polygonKind(vertices: Point[]): BoardObject['type'] {
+  if (vertices.length === 3) return 'triangle';
+  if (vertices.length === 5) return 'pentagon';
+  if (vertices.length === 6) return 'hexagon';
+  if (vertices.length !== 4) return 'polygon';
+  const angles = vertices.map((point, i) => edgeAngle(point, vertices[(i + 1) % 4]));
+  const orthogonal = vertices.every((point, i) => rightAngle(vertices[(i + 3) % 4], point, vertices[(i + 1) % 4]));
+  if (orthogonal) {
+    const b = vertexBounds(vertices), ratio = b.width / b.height;
+    return ratio > .82 && ratio < 1.22 ? 'square' : 'rectangle';
+  }
+  const pairs = Number(parallel(angles[0], angles[2])) + Number(parallel(angles[1], angles[3]));
+  return pairs === 2 ? 'parallelogram' : pairs === 1 ? 'trapezoid' : 'polygon';
+}
 /** Geometry-only recognizer. It never mutates history and excludes eraser/highlighter ink. */
 export function recognizeStroke(stroke: Stroke): Recognition | null {
   if (stroke.brush.tool !== 'pen' || stroke.points.length < 8) return null;
@@ -50,6 +89,16 @@ export function recognizeStroke(stroke: Stroke): Recognition | null {
     return null;
   }
   if (closure > 0.17 || w < 35 || h < 35 || length > 2.2 * (w + h)) return null;
+  const corners = closedCorners(stroke.points, diag * .035);
+  const visiblyCornered = corners.length <= 6 || corners.every((vertex, i) => interiorAngle(corners[(i + corners.length - 1) % corners.length], vertex, corners[(i + 1) % corners.length]) <= 132);
+  if (corners.length >= 3 && corners.length <= 12 && visiblyCornered && validPolygon(corners)) {
+    const kind = polygonKind(corners), error = polygonError(points, corners, true, diag);
+    const perimeter = corners.reduce((sum, p, i) => sum + distance(p, corners[(i + 1) % corners.length]), 0);
+    if (error < .025 && length > perimeter * .76 && length < perimeter * 1.3 && cornersCovered(points, corners, diag)) {
+      const box = vertexBounds(corners);
+      return { object: { ...base, ...box, type: kind, vertices: corners, regular: kind === 'square' || kind === 'pentagon' || kind === 'hexagon' }, confidence: Math.max(.7, 1 - error * 5 - closure) };
+    }
+  }
   const rectangle: BoardObject = { ...base, type: 'rectangle' };
   const rectOutline = objectOutline(rectangle), rectError = polygonError(points, rectOutline, true, diag);
   const perimeter = 2 * (w + h);
@@ -60,7 +109,7 @@ export function recognizeStroke(stroke: Stroke): Recognition | null {
   const triError = polygonError(points, triOutline, true, diag);
   if (triError < 0.05 && length > triPerimeter * 0.75 && length < triPerimeter * 1.3 && cornersCovered(points, triOutline, diag))
     return { object: triangle, confidence: Math.max(0.7, 1 - triError * 5 - closure) };
-  const ellipse: BoardObject = { ...base, type: 'ellipse' };
+  const ellipse: BoardObject = { ...base, type: w / h > .86 && w / h < 1.16 ? 'circle' : 'ellipse' };
   const ellipseError = polygonError(points, objectOutline(ellipse), true, diag);
   const a = w / 2, c = h / 2, ellipsePerimeter = Math.PI * (3 * (a + c) - Math.sqrt((3 * a + c) * (a + 3 * c)));
   if (ellipseError < 0.039 && length > ellipsePerimeter * 0.8 && length < ellipsePerimeter * 1.25)

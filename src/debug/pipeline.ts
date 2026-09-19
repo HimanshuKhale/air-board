@@ -2,7 +2,7 @@ import type { CameraSession } from '../camera/session';
 import type { Settings } from '../core/types';
 import { cameraToCanvas } from '../core/coordinates';
 import type { PreviewMessage, TrackingResult } from '../tracking/protocol';
-import { handednessName, palmCenter } from '../interaction/pose';
+import { anatomicalHandedness, palmCenter } from '../interaction/pose';
 import { virtualNib } from '../interaction/stylus';
 const edges = [[0,1,2,3,4],[0,5,6,7,8],[5,9,10,11,12],[9,13,14,15,16],[13,17,18,19,20],[0,17]];
 /** Debug-only DOM/canvases. No board state, drawing pixels, persistence or network use. */
@@ -200,7 +200,7 @@ export class PipelineDebug {
         ctx.beginPath(); edge.forEach((index, i) => { const p = points[index]; if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); }); ctx.stroke();
       }
       points.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2); ctx.fill(); });
-      if (handednessName(this.result.stats.handedness[handIndex] ?? []) === settings.dominantHand) {
+      if (anatomicalHandedness(this.result.stats.handedness[handIndex] ?? [], false, .7) === settings.dominantHand) {
         const palm = cameraToCanvas(palmCenter(hand), { width: video.videoWidth, height: video.videoHeight }, { width, height }, settings.background.mirror, 'cover');
         ctx.fillStyle = '#ffb000'; ctx.beginPath(); ctx.arc(palm.x, palm.y, 5, 0, Math.PI * 2); ctx.fill();
         ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(points[8].x, points[8].y, 4, 0, Math.PI * 2); ctx.fill();

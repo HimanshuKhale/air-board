@@ -1,7 +1,7 @@
 import type { Point, Settings } from '../core/types';
 import { homographyFromQuad } from './homography';
 export const HAND_SETTINGS_KEY = 'saai-airboard-hand-settings-v1';
-type Stored = Pick<Settings, 'dominantHand' | 'gestureSensitivity' | 'inputMode' | 'stylusOffset' | 'openPalmHoldMs' | 'palmEraserSize' | 'planePoints' | 'lassoCloseRadius' | 'fistGrabRadius' | 'twoHandHoldMs' | 'twoHandProximity' | 'smartShapes' | 'autoConvertShapes'>;
+type Stored = Pick<Settings, 'dominantHand' | 'gestureSensitivity' | 'inputMode' | 'stylusOffset' | 'openPalmHoldMs' | 'palmEraserSize' | 'planePoints' | 'lassoCloseRadius' | 'fistGrabRadius' | 'twoHandHoldMs' | 'twoHandProximity' | 'smartShapes' | 'autoConvertShapes' | 'confirmationHoldMs' | 'shapeEditMode' | 'shapeResizeMode'>;
 export function loadHandSettings(base: Settings): Settings {
   try {
     const value = JSON.parse(localStorage.getItem(HAND_SETTINGS_KEY) ?? '{}') as Partial<Stored>;
@@ -18,6 +18,9 @@ export function loadHandSettings(base: Settings): Settings {
     if (validStoredPoints(value.planePoints)) base.planePoints = value.planePoints;
     if (typeof value.smartShapes === 'boolean') base.smartShapes = value.smartShapes;
     if (typeof value.autoConvertShapes === 'boolean') base.autoConvertShapes = value.autoConvertShapes;
+    if (typeof value.confirmationHoldMs === 'number' && value.confirmationHoldMs >= 300 && value.confirmationHoldMs <= 500) base.confirmationHoldMs = value.confirmationHoldMs;
+    if (value.shapeEditMode === 'scale' || value.shapeEditMode === 'points') base.shapeEditMode = value.shapeEditMode;
+    if (value.shapeResizeMode === 'proportional' || value.shapeResizeMode === 'free') base.shapeResizeMode = value.shapeResizeMode;
   } catch { /* Corrupt local preferences fall back to safe defaults. */ }
   return base;
 }
@@ -29,6 +32,7 @@ const validStoredPoints = (value: unknown): value is Point[] | null => {
 export function saveHandSettings(settings: Settings): void {
   const value: Stored = { dominantHand: settings.dominantHand, gestureSensitivity: settings.gestureSensitivity, inputMode: settings.inputMode, stylusOffset: settings.stylusOffset, openPalmHoldMs: settings.openPalmHoldMs,
     palmEraserSize: settings.palmEraserSize, planePoints: settings.planePoints, lassoCloseRadius: settings.lassoCloseRadius, fistGrabRadius: settings.fistGrabRadius,
-    twoHandHoldMs: settings.twoHandHoldMs, twoHandProximity: settings.twoHandProximity, smartShapes: settings.smartShapes, autoConvertShapes: settings.autoConvertShapes };
+    twoHandHoldMs: settings.twoHandHoldMs, twoHandProximity: settings.twoHandProximity, smartShapes: settings.smartShapes, autoConvertShapes: settings.autoConvertShapes,
+    confirmationHoldMs: settings.confirmationHoldMs, shapeEditMode: settings.shapeEditMode, shapeResizeMode: settings.shapeResizeMode };
   try { localStorage.setItem(HAND_SETTINGS_KEY, JSON.stringify(value)); } catch { /* Storage can be unavailable in private mode. */ }
 }

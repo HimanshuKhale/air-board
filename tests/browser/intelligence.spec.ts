@@ -45,6 +45,25 @@ test('rough circle converts to an editable ellipse and undo restores ink', async
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect.poll(() => pixel(page, 820, 450)).toBeGreaterThan(0);
 });
+test('shape palette free-resizes with a live handle and commits one undo action', async ({ page }) => {
+  await ready(page);
+  await page.getByRole('button', { name: 'Shapes', exact: true }).click();
+  await page.locator('[data-create-shape="rectangle"]').click();
+  await expect(page.locator('#shape-edit-bar')).toBeVisible();
+  await page.locator('[data-action="resize-free"]').click();
+  await expect(page.locator('[data-action="resize-free"]')).toHaveAttribute('aria-pressed', 'true');
+  const alpha = () => page.locator('#drawing').evaluate(canvas => {
+    const data = (canvas as HTMLCanvasElement).getContext('2d')!.getImageData(0, 0, 500, 400).data;
+    let total = 0; for (let i = 3; i < data.length; i += 4) total += data[i]; return total;
+  });
+  const before = await alpha(), box = (await page.locator('#drawing').boundingBox())!;
+  const at = (x: number, y: number) => ({ x: box.x + box.width * x / 1600, y: box.y + box.height * y / 900 });
+  const start = at(310, 230), end = at(430, 320);
+  await page.mouse.move(start.x, start.y); await page.mouse.down(); await page.mouse.move(end.x, end.y, { steps: 8 }); await page.mouse.up();
+  await expect.poll(alpha).not.toBe(before);
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect.poll(alpha).toBe(before);
+});
 test('Hinglish commands create an atomic synchronized diagram and avoid duplicates', async ({ page, context }) => {
   await ready(page); await page.getByRole('button', { name: 'Voice', exact: true }).click();
   await page.locator('#ai-mode').selectOption('commands');

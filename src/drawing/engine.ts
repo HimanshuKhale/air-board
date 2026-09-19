@@ -1,4 +1,4 @@
-import { BOARD, type HistoryState, type Stroke } from '../core/types';
+import { BOARD, type BoardObject, type HistoryState, type Stroke } from '../core/types';
 import { currentScene, type MovePreview } from './history';
 import { paintObject } from './objects';
 export function paintStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
@@ -30,6 +30,7 @@ export class DrawingEngine {
   private dirty = true;
   private historyDirty = true;
   private movePreview: MovePreview | null = null;
+  private objectPreview: BoardObject | null = null;
   constructor(readonly canvas: HTMLCanvasElement) {
     canvas.width = this.committed.width = BOARD.width;
     canvas.height = this.committed.height = BOARD.height;
@@ -38,13 +39,14 @@ export class DrawingEngine {
   }
   invalidate(committed = true): void { this.dirty = true; this.historyDirty ||= committed; }
   setMovePreview(preview: MovePreview | null): void { this.movePreview = preview; this.dirty = true; }
+  setObjectPreview(preview: BoardObject | null): void { this.objectPreview = preview; this.dirty = true; }
   render(history: HistoryState): void {
     if (!this.dirty) return;
-    if (this.movePreview) {
+    if (this.movePreview || this.objectPreview) {
       this.context.clearRect(0, 0, BOARD.width, BOARD.height);
       const scene = currentScene(history, this.movePreview);
       for (const stroke of scene.strokes) paintStroke(this.context, stroke);
-      for (const object of scene.objects) paintObject(this.context, object);
+      for (const object of scene.objects) paintObject(this.context, this.objectPreview?.id === object.id ? this.objectPreview : object);
       this.dirty = false; return;
     }
     if (this.historyDirty) {

@@ -14,7 +14,7 @@ export type Intent =
   | { kind: 'undo' | 'redo' | 'delete' | 'clear' };
 const colors: Record<string, string> = { red: '#da5650', लाल: '#da5650', blue: '#3b6fe8', नीला: '#3b6fe8', green: '#225c4a', हरा: '#225c4a', black: '#202a35', काला: '#202a35', yellow: '#e5ad38', पीला: '#e5ad38' };
 const numbers: Record<string, number> = { one: 1, ek: 1, एक: 1, two: 2, do: 2, दो: 2, three: 3, teen: 3, तीन: 3, four: 4, chaar: 4, चार: 4 };
-const types: Record<string, ShapeKind> = { box: 'rectangle', boxes: 'rectangle', rectangle: 'rectangle', rectangles: 'rectangle', आयत: 'rectangle', circle: 'ellipse', circles: 'ellipse', गोला: 'ellipse', ellipse: 'ellipse', triangle: 'triangle', त्रिकोण: 'triangle', arrow: 'arrow', तीर: 'arrow', line: 'line', रेखा: 'line' };
+const types: Record<string, ShapeKind> = { box: 'rectangle', boxes: 'rectangle', rectangle: 'rectangle', rectangles: 'rectangle', square: 'square', squares: 'square', parallelogram: 'parallelogram', trapezoid: 'trapezoid', pentagon: 'pentagon', hexagon: 'hexagon', polygon: 'polygon', आयत: 'rectangle', circle: 'circle', circles: 'circle', गोला: 'circle', ellipse: 'ellipse', triangle: 'triangle', त्रिकोण: 'triangle', arrow: 'arrow', तीर: 'arrow', line: 'line', रेखा: 'line' };
 const clean = (s: string) => s.trim().replace(/[.!?।]+$/g, '').trim();
 const slug = (s: string, i: number) => (s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 26) || 'node') + '_' + i;
 /** Parse finalized text only. A wake word or explicit Command Mode is required. */
@@ -65,7 +65,7 @@ export function parseCommand(transcript: string, commandMode = false): Intent | 
   if (resize) return { kind: 'resize', target: clean(resize[1]), factor: /bigger|large|बड़ा/.test(resize[2]) ? 1.2 : 0.8 };
   const select = text.match(/^(?:select|choose|chuno|चुनो)\s+(.+)$/);
   if (select) return { kind: 'select', target: clean(select[1]) };
-  const create = text.match(/^(?:create|make|draw|banao|बनाओ)?\s*(one|two|three|four|ek|do|teen|chaar|एक|दो|तीन|चार|[1-4])?\s*(box|boxes|rectangle|rectangles|circle|circles|ellipse|triangle|arrow|line|आयत|गोला|त्रिकोण|तीर|रेखा)\s*(?:banao|बनाओ|draw|please)?$/);
+  const create = text.match(/^(?:create|make|draw|banao|बनाओ)?\s*(one|two|three|four|ek|do|teen|chaar|एक|दो|तीन|चार|[1-4])?\s*(box|boxes|rectangle|rectangles|square|squares|parallelogram|trapezoid|pentagon|hexagon|polygon|circle|circles|ellipse|triangle|arrow|line|आयत|गोला|त्रिकोण|तीर|रेखा)\s*(?:banao|बनाओ|draw|please)?$/);
   if (create) return { kind: 'create', type: types[create[2]], count: numbers[create[1]] || Number(create[1]) || 1 };
   return null;
 }
