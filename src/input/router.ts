@@ -2,6 +2,8 @@ import { BOARD, type Point } from '../core/types';
 import { canvasToClient, clientToCanvas, inside } from '../core/coordinates';
 import type { BoardChannel } from '../sync/channel';
 import type { PinchPhase } from './pinch';
+import { currentObjects } from '../drawing/history';
+import { nearestObject } from '../drawing/objects';
 /** Mouse, touch and generic hand events share the same action protocol. */
 export class InputRouter {
   private stroke: string | null = null;
@@ -9,6 +11,7 @@ export class InputRouter {
   private handTarget: HTMLElement | null = null;
   private mouseDown = false;
   private previousMouse: Point | null = null;
+  private drag: { ids: string[]; start: Point; point: Point } | null = null;
   onPointer: (client: Point, held: boolean, hand: boolean) => void = () => {};
   onActivity: () => void = () => {};
   constructor(readonly canvas: HTMLCanvasElement, readonly bus: BoardChannel) {
@@ -20,6 +23,13 @@ export class InputRouter {
       canvas.setPointerCapture(event.pointerId);
       const client = { x: event.clientX, y: event.clientY };
       const point = clientToCanvas(client, canvas.getBoundingClientRect(), BOARD);
+      if (event.shiftKey) {
+        const hit = nearestObject(currentObjects(bus.state.history), point, 24);
+        const ids = hit ? (bus.state.selection.includes(hit.id) ? bus.state.selection : [hit.id]) : [];
+        bus.send({ type: 'select', ids });
+        if (ids.length) this.drag = { ids, start: point, point };
+        this.onPointer(client, true, false); this.onActivity(); return;
+      }
       this.begin(point, 'mouse'); this.previousMouse = point;
       this.onPointer(client, true, false); this.onActivity();
     });
@@ -28,6 +38,7 @@ export class InputRouter {
       const client = { x: event.clientX, y: event.clientY };
       this.onPointer(client, this.mouseDown, false);
       if (!this.mouseDown) return;
+      if (this.drag) { this.drag.point = clientToCanvas(client, canvas.getBoundingClientRect(), BOARD); return; }
       const samples = event.getCoalescedEvents?.();
       for (const sample of samples?.length ? samples : [event]) {
         const point = clientToCanvas({ x: sample.clientX, y: sample.clientY }, canvas.getBoundingClientRect(), BOARD);
@@ -38,18 +49,32 @@ export class InputRouter {
       }
     });
     for (const name of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(name, event => {
-      this.mouseDown = false; this.previousMouse = null; if (this.source === 'mouse') this.endStroke();
+      this.mouseDown = false; this.previousMouse = null;
+      if (this.drag) {
+        const { ids, start, point } = this.drag; this.drag = null;
+        if (Math.hypot(point.x - start.x, point.y - start.y) >= 0.5) bus.send({ type: 'move', ids, dx: point.x - start.x, dy: point.y - start.y });
+      }
+      if (this.source === 'mouse') this.endStroke();
       if (event instanceof PointerEvent) this.onPointer({ x: event.clientX, y: event.clientY }, false, false);
     });
     window.addEventListener('blur', () => this.end());
   }
   private begin(point: Point, source: 'mouse' | 'hand'): void {
     if (!inside(point, BOARD) || !this.bus.ready || this.bus.state.history.active) return;
+    if (this.eraseObject(point)) return;
     this.stroke = crypto.randomUUID(); this.source = source;
     this.bus.send({ type: 'begin', id: this.stroke, point, brush: this.bus.state.settings.brush });
   }
   private move(point: Point): void {
+    this.eraseObject(point);
     if (this.stroke && inside(point, BOARD)) this.bus.send({ type: 'point', id: this.stroke, point });
+  }
+  private eraseObject(point: Point): boolean {
+    const brush = this.bus.state.settings.brush;
+    if (brush.tool !== 'eraser') return false;
+    const object = nearestObject(currentObjects(this.bus.state.history), point, brush.size / 2);
+    if (object) this.bus.send({ type: 'delete-object', id: object.id });
+    return !!object;
   }
   private endStroke(): void {
     if (this.stroke) this.bus.send({ type: 'end', id: this.stroke });

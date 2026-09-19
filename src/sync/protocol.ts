@@ -1,5 +1,5 @@
-import type { BoardState, Brush, Point, Settings } from '../core/types';
-import { appendPoint, beginStroke, clear, finishStroke, moveStrokes, redo, undo } from '../drawing/history';
+import type { BoardObject, BoardState, Brush, Point, Settings } from '../core/types';
+import { appendPoint, beginStroke, clear, createDiagram, createObject, deleteObject, finishStroke, moveStrokes, redo, replaceStroke, undo, updateObject } from '../drawing/history';
 import { homographyFromQuad } from '../calibration/homography';
 export type Command =
   | { type: 'settings'; patch: Partial<Settings> }
@@ -8,12 +8,25 @@ export type Command =
   | { type: 'end'; id: string }
   | { type: 'select'; ids: string[] }
   | { type: 'move'; ids: string[]; dx: number; dy: number }
+  | { type: 'create-object'; object: BoardObject }
+  | { type: 'update-object'; object: BoardObject }
+  | { type: 'delete-object'; id: string }
+  | { type: 'replace-stroke'; strokeId: string; object: BoardObject }
+  | { type: 'create-diagram'; objects: BoardObject[]; requestId: string; baseRevision: number }
   | { type: 'undo' | 'redo' | 'clear' };
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const range = (v: unknown, min: number, max: number): v is number => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
 const color = (v: unknown) => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
 const point = (v: unknown): v is Point => object(v) && range(v.x, 0, 1600) && range(v.y, 0, 900);
 const id = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length < 100;
+export function validBoardObject(v: unknown): v is BoardObject {
+  return object(v) && id(v.id) && ['line', 'rectangle', 'ellipse', 'triangle', 'arrow', 'text', 'connector'].includes(String(v.type)) &&
+    range(v.x, 0, 1600) && range(v.y, 0, 900) && range(v.width, 1, 1600) && range(v.height, 1, 900) &&
+    v.x + v.width <= 1600 && v.y + v.height <= 900 && color(v.color) && range(v.strokeWidth, 1, 100) &&
+    typeof v.text === 'string' && v.text.length <= 200 && !/[<>]/.test(v.text) && (v.flipY === undefined || typeof v.flipY === 'boolean') &&
+    ((v.fromId === undefined && v.toId === undefined) || (v.type === 'connector' && id(v.fromId) && id(v.toId) && v.fromId !== v.toId)) &&
+    Object.keys(v).every(key => ['id', 'type', 'x', 'y', 'width', 'height', 'color', 'strokeWidth', 'text', 'flipY', 'fromId', 'toId'].includes(key));
+}
 const planePoints = (v: unknown): v is Point[] | null => {
   if (v === null) return true;
   if (!Array.isArray(v) || v.length !== 4 || !v.every(p => object(p) && range(p.x, -1, 2) && range(p.y, -1, 2))) return false;
@@ -46,6 +59,7 @@ export function validSettingsPatch(v: unknown): v is Partial<Settings> {
       case 'twoHandHoldMs': return range(value, 400, 600);
       case 'twoHandProximity': return range(value, 0.08, 0.5);
       case 'paused': case 'autoHide': return typeof value === 'boolean';
+      case 'smartShapes': case 'autoConvertShapes': return typeof value === 'boolean';
       default: return false;
     }
   });
@@ -59,6 +73,10 @@ export function validCommand(v: unknown): v is Command {
     case 'end': return id(v.id);
     case 'select': return Array.isArray(v.ids) && v.ids.length <= 1000 && v.ids.every(id);
     case 'move': return Array.isArray(v.ids) && v.ids.length > 0 && v.ids.length <= 1000 && v.ids.every(id) && range(v.dx, -3200, 3200) && range(v.dy, -1800, 1800);
+    case 'create-object': case 'update-object': return validBoardObject(v.object);
+    case 'delete-object': return id(v.id);
+    case 'replace-stroke': return id(v.strokeId) && validBoardObject(v.object);
+    case 'create-diagram': return id(v.requestId) && Number.isInteger(v.baseRevision) && range(v.baseRevision, 0, Number.MAX_SAFE_INTEGER) && Array.isArray(v.objects) && v.objects.length > 0 && v.objects.length <= 100 && v.objects.every(validBoardObject) && new Set(v.objects.map(o => (o as BoardObject).id)).size === v.objects.length;
     case 'undo': case 'redo': case 'clear': return true;
     default: return false;
   }
@@ -68,7 +86,8 @@ export function validState(v: unknown): v is BoardState {
   if (!object(v) || !object(v.settings) || !validSettingsPatch(v.settings) || !requiredSettings.every(key => Object.hasOwn(v.settings as object, key)) || !object(v.history) || !Array.isArray(v.selection) || !v.selection.every(id)) return false;
   const h = v.history;
   const stroke = (s: unknown) => object(s) && id(s.id) && validBrush(s.brush) && Array.isArray(s.points) && s.points.length > 0 && s.points.length <= 12000 && s.points.every(point);
-  return Array.isArray(h.actions) && h.actions.every(a => object(a) && (a.kind === 'clear' || (a.kind === 'stroke' && stroke(a.stroke)) || (a.kind === 'move' && Array.isArray(a.ids) && a.ids.length > 0 && a.ids.every(id) && range(a.dx, -3200, 3200) && range(a.dy, -1800, 1800)))) &&
+  return Array.isArray(h.actions) && h.actions.every(a => object(a) && (a.kind === 'clear' || (a.kind === 'stroke' && stroke(a.stroke)) || (a.kind === 'move' && Array.isArray(a.ids) && a.ids.length > 0 && a.ids.every(id) && range(a.dx, -3200, 3200) && range(a.dy, -1800, 1800)) ||
+    ((a.kind === 'create' || a.kind === 'update') && validBoardObject(a.object)) || (a.kind === 'delete' && id(a.id)) || (a.kind === 'replace' && id(a.strokeId) && validBoardObject(a.object)) || (a.kind === 'diagram' && Array.isArray(a.objects) && a.objects.length <= 100 && a.objects.every(validBoardObject)))) &&
     Number.isInteger(h.position) && range(h.position, 0, h.actions.length) && (h.active === null || stroke(h.active));
 }
 export function reduce(state: BoardState, command: Command): void {
@@ -82,6 +101,11 @@ export function reduce(state: BoardState, command: Command): void {
     case 'end': finishStroke(state.history, command.id); break;
     case 'select': state.selection = [...new Set(command.ids)]; break;
     case 'move': moveStrokes(state.history, command.ids, command.dx, command.dy); state.selection = [...new Set(command.ids)]; break;
+    case 'create-object': createObject(state.history, command.object); break;
+    case 'update-object': updateObject(state.history, command.object); break;
+    case 'delete-object': deleteObject(state.history, command.id); state.selection = state.selection.filter(id => id !== command.id); break;
+    case 'replace-stroke': replaceStroke(state.history, command.strokeId, command.object); state.selection = state.selection.map(id => id === command.strokeId ? command.object.id : id); break;
+    case 'create-diagram': createDiagram(state.history, command.objects); break;
     case 'undo': undo(state.history); state.selection = []; break;
     case 'redo': redo(state.history); state.selection = []; break;
     case 'clear': clear(state.history); state.selection = []; break;

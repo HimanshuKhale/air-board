@@ -14,6 +14,8 @@
     "test:ui": "playwright test",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview --host 127.0.0.1",
+    "ai:mock": "node server/ai.mjs",
+    "ai": "node --env-file=.env server/ai.mjs",
     "setup:assets": "node scripts/setup-assets.mjs",
     "postinstall": "npm run setup:assets && npm run setup:worker",
     "check": "npm run test && npm run build",

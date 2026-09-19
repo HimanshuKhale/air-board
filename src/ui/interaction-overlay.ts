@@ -1,8 +1,8 @@
-import type { Point, Stroke } from '../core/types';
+import type { BoardObject, Point, Stroke } from '../core/types';
 import type { InteractionVisuals } from '../interaction/controller';
 import { bounds } from '../selection/geometry';
 
-export function drawInteractionOverlay(ctx: CanvasRenderingContext2D, visuals: InteractionVisuals, strokes: Stroke[], selectedIds: string[]): void {
+export function drawInteractionOverlay(ctx: CanvasRenderingContext2D, visuals: InteractionVisuals, strokes: Stroke[], selectedIds: string[], objects: BoardObject[] = []): void {
   ctx.save();
   if (visuals.lasso.length) {
     ctx.strokeStyle = '#3b6fe8'; ctx.lineWidth = 3; ctx.setLineDash([10, 8]);
@@ -10,8 +10,9 @@ export function drawInteractionOverlay(ctx: CanvasRenderingContext2D, visuals: I
     if (visuals.lassoStart) { ctx.setLineDash([]); ctx.fillStyle = '#3b6fe8'; ctx.beginPath(); ctx.arc(visuals.lassoStart.x, visuals.lassoStart.y, 8, 0, Math.PI * 2); ctx.fill(); }
   }
   const selected = strokes.filter(stroke => selectedIds.includes(stroke.id));
-  if (selected.length) {
-    const all = selected.flatMap(stroke => stroke.points);
+  const selectedObjects = objects.filter(object => selectedIds.includes(object.id));
+  if (selected.length || selectedObjects.length) {
+    const all = [...selected.flatMap(stroke => stroke.points), ...selectedObjects.flatMap(object => [{ x: object.x, y: object.y }, { x: object.x + object.width, y: object.y + object.height }])];
     const box = bounds(all); const padding = 12;
     ctx.strokeStyle = '#3b6fe8'; ctx.fillStyle = 'rgba(59,111,232,.06)'; ctx.lineWidth = 3; ctx.setLineDash([12, 8]);
     ctx.fillRect(box.minX - padding, box.minY - padding, box.maxX - box.minX + padding * 2, box.maxY - box.minY + padding * 2);

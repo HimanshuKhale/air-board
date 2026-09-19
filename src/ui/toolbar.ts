@@ -13,6 +13,6 @@ export function toolbar(): string {
   <label class="size-label">Size <input type="range" min="1" max="100" value="6" data-setting="size" aria-label="Brush size"><output data-size>6</output></label>
   <div class="size-presets">${[4, 10, 24, 48].map(n => `<button type="button" data-size-preset="${n}" title="${n} pixel brush" aria-label="${n} pixel brush"><i style="width:${Math.min(n, 20)}px;height:${Math.min(n, 20)}px"></i></button>`).join('')}</div>
   <div class="tool-divider"></div><div class="tool-group compact">
-  ${button('undo', 'Undo', 'undo')}${button('redo', 'Redo', 'redo')}${button('clear', 'Clear drawing', 'clear')}
+  ${button('undo', 'Undo', 'undo')}${button('redo', 'Redo', 'redo')}${button('clear', 'Clear drawing', 'clear')}${button('voice-panel', 'Voice', 'settings')}
   </div>`;
 }

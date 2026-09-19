@@ -14,12 +14,14 @@ export class BoardChannel {
   private epoch = '';
   private release?: () => void;
   private abort = new AbortController();
-  private pending: Command[] = [];
+  private pending: { command: Command; requestId?: string }[] = [];
   private unacknowledged = new Map<string, Command>();
   private applied = new Set<string>();
   private retry: ReturnType<typeof setInterval>;
   private activeAt = 0;
-  onChange: (command?: Command) => void = () => {};
+  get currentRevision(): number { return this.revision; }
+  onChange: (command?: Command, requestId?: string) => void = () => {};
+  onRejected: (requestId: string, reason: string) => void = () => {};
   onSignal: (signal: Signal) => void = () => {};
   constructor(state: BoardState = initialState()) {
     this.state = state;
@@ -41,10 +43,10 @@ export class BoardChannel {
       this.leader = false;
     }).catch(error => { if (error.name !== 'AbortError') console.error(error); });
   }
-  send(command: Command): void {
+  send(command: Command, suppliedRequestId?: string): void {
     if (!validCommand(command)) throw new Error('Invalid board command');
-    if (!this.ready) { this.pending.push(command); return; }
-    const requestId = crypto.randomUUID();
+    if (!this.ready) { this.pending.push({ command, requestId: suppliedRequestId }); return; }
+    const requestId = suppliedRequestId ?? (command.type === 'create-diagram' ? command.requestId : crypto.randomUUID());
     this.unacknowledged.set(requestId, command);
     this.deliver(requestId, command);
   }
@@ -59,14 +61,18 @@ export class BoardChannel {
       return;
     }
     if (this.leader) {
+      if (command.type === 'create-diagram' && command.baseRevision !== this.revision) {
+        this.remember(requestId); this.channel.postMessage({ v: 1, kind: 'reject', requestId, reason: 'Board changed before the diagram was applied' });
+        this.onRejected(requestId, 'Board changed before the diagram was applied'); return;
+      }
       reduce(this.state, command); this.activeAt = Date.now(); this.revision++;
       this.remember(requestId);
       this.channel.postMessage({ v: 1, kind: 'event', epoch: this.epoch, revision: this.revision, requestId, command });
-      this.onChange(command);
+      this.onChange(command, requestId);
     } else this.channel.postMessage({ v: 1, kind: 'command', requestId, command });
   }
   signal(signal: Omit<Signal, 'sender'>): void { this.channel.postMessage({ ...signal, v: 1, sender: this.id }); }
-  private flush(): void { for (const command of this.pending.splice(0)) this.send(command); }
+  private flush(): void { for (const pending of this.pending.splice(0)) this.send(pending.command, pending.requestId); }
   private broadcastSnapshot(target?: string): void {
     this.channel.postMessage({ v: 1, kind: 'snapshot', target, epoch: this.epoch, revision: this.revision, applied: [...this.applied], state: this.state });
   }
@@ -76,11 +82,16 @@ export class BoardChannel {
     if (m.v !== 1) return;
     if (m.kind === 'hello' && this.leader && typeof m.sender === 'string') this.broadcastSnapshot(m.sender);
     if (m.kind === 'ack' && typeof m.requestId === 'string') this.unacknowledged.delete(m.requestId);
+    if (m.kind === 'reject' && typeof m.requestId === 'string' && typeof m.reason === 'string' && this.unacknowledged.has(m.requestId)) {
+      this.unacknowledged.delete(m.requestId); this.onRejected(m.requestId, m.reason);
+    }
     if (m.kind === 'command' && this.leader && typeof m.requestId === 'string' && m.requestId.length < 100 && validCommand(m.command)) this.deliver(m.requestId, m.command);
     if (m.kind === 'snapshot' && !this.leader && (!m.target || m.target === this.id) && typeof m.epoch === 'string' && Number.isInteger(m.revision) && validState(m.state)) {
       if (m.epoch === this.epoch && (m.revision as number) < this.revision) return;
       if (!Array.isArray(m.applied) || m.applied.length > 4096 || !m.applied.every(id => typeof id === 'string' && id.length < 100)) return;
       this.state = m.state; this.epoch = m.epoch; this.revision = m.revision as number;
+      this.state.settings.smartShapes ??= true;
+      this.state.settings.autoConvertShapes ??= false;
       this.applied = new Set(m.applied as string[]);
       for (const id of this.applied) this.unacknowledged.delete(id);
       this.ready = true; this.onChange(); this.flush();
@@ -90,7 +101,7 @@ export class BoardChannel {
       if (!this.ready || m.epoch !== this.epoch || m.revision !== this.revision + 1) {
         this.ready = false; this.channel.postMessage({ v: 1, kind: 'hello', sender: this.id }); return;
       }
-      reduce(this.state, m.command); this.remember(m.requestId); this.revision = m.revision as number; this.onChange(m.command);
+      reduce(this.state, m.command); this.remember(m.requestId); this.revision = m.revision as number; this.onChange(m.command, m.requestId);
     }
     if (['camera-request', 'camera-status', 'export-request'].includes(String(m.kind)) && typeof m.sender === 'string') this.onSignal(m as Signal);
   }

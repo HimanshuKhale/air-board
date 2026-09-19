@@ -78,3 +78,17 @@ Record laptop/CPU, Windows version, Chrome/Edge version, webcam, lighting, date,
 - [ ] Repeat in typical classroom lighting, with your usual background, at normal hand distance.
 - [ ] Test a longer teaching session, many strokes, undo and export. Watch memory/performance.
 - [ ] Save before closing the last app window: session drawings are intentionally memory-only.
+
+## Intelligence V1: real microphone and webcam acceptance
+
+- [ ] With the AI service stopped, draw, pinch, erase, undo and export normally. Typed commands in Commands mode still work.
+- [ ] Draw a large rough rectangle and circle with mouse, touch and pinch separately. Check the clean preview, Convert, Keep ink, and Undo restoring the rough stroke. Try handwriting O, A, D and small notes; keep ambiguous marks as ink.
+- [ ] Select a converted shape by lasso and by Shift-click; move it by fist and Shift-drag. Erase it with open palm and mouse eraser; one Undo restores the shape. Confirm freehand erasing still reveals a changed background.
+- [ ] Start `npm.cmd run ai` with a real server-side key, then choose Commands and click Start microphone. Deny permission once and confirm a useful error. Retry and confirm only the microphone indicator turns on; camera ownership is unchanged.
+- [ ] Say English, Hindi and Hinglish phrases, including “AirBoard, ek rectangle banao”, “AirBoard, teen boxes banao”, “AirBoard, create a flowchart with data collection, model training and deployment”, and Hindi with English technical terms. Check transcript fidelity and that interim text never creates objects.
+- [ ] Select a box; try “Is box ko database naam do”, “Ye arrow red kar do”, “Connect the API to the database”, and “Ab model training ke neeche deployment add karo”. Check that ambiguous references cause a message instead of the wrong edit.
+- [ ] Move a generated box and confirm its connector follows. Undo the entire generated diagram in one step. Open Presentation late, then close Studio during a pending transcription; confirm one diagram only.
+- [ ] Say clear board and verify confirmation is required. Try repeated transcripts and verify no duplicate objects. Stop microphone; confirm the browser microphone indicator turns off and no more audio requests occur.
+- [ ] Disconnect the speech service or internet mid-session. Confirm board content remains, pen and webcam control continue, and no cloud request contains camera frames, screenshots or the whole board.
+- [ ] Save board and transparent PNGs containing native shapes and labels. Verify Presentation output and your actual screen-sharing setup.
+- [ ] Review provider usage and spending limit after a live trial. Automatic mode should remain unavailable in the UI.

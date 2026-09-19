@@ -7,7 +7,8 @@ import type { PinchPhase } from '../input/pinch';
 import { ExponentialFilter } from '../input/filter';
 import { classifyPose, handednessName, palmCenter, type StaticGesture } from './pose';
 import { PoseStabilizer } from './temporal';
-import { currentStrokes } from '../drawing/history';
+import { currentObjects, currentStrokes } from '../drawing/history';
+import { nearestObject, selectObjects } from '../drawing/objects';
 import { bounds, nearestStroke, pathLength, selectStrokes, validLasso } from '../selection/geometry';
 import type { MovePreview } from '../drawing/history';
 import { TwoHandToggle } from './two-hand';
@@ -49,6 +50,9 @@ export class InteractionController {
   private palmFilter = new ExponentialFilter(0.55);
   private fistFilter = new ExponentialFilter(0.55);
   private eraserId: string | null = null;
+  private erasing = false;
+  private shapeErasePoint: Point | null = null;
+  private erasedObjects = new Set<string>();
   private lastDominant: string | null = null;
   private lasso: Point[] = [];
   private lassoAt = 0;
@@ -120,7 +124,7 @@ export class InteractionController {
       if (classification.gesture !== 'index-only' || now - this.lassoAt > 8000) this.cancelLasso();
       else { this.continueLasso(mapped, now, settings); return; }
     }
-    if (this.eraserId) {
+    if (this.erasing) {
       if (classification.gesture !== 'open-palm') this.endErase();
       else { this.continueErase(dominant.landmarks, size, now, settings); return; }
     }
@@ -193,7 +197,7 @@ export class InteractionController {
     const distanceToStart = Math.hypot(point.x - this.lasso[0].x, point.y - this.lasso[0].y);
     if (this.lasso.length >= 12 && pathLength(this.lasso) >= 180 && distanceToStart <= settings.lassoCloseRadius) {
       if (validLasso(this.lasso, settings.lassoCloseRadius)) {
-        const ids = selectStrokes(currentStrokes(this.hooks.getState().history), this.lasso);
+        const ids = [...selectStrokes(currentStrokes(this.hooks.getState().history), this.lasso), ...selectObjects(currentObjects(this.hooks.getState().history), this.lasso)];
         this.hooks.send({ type: 'select', ids });
         this.hooks.toast(ids.length ? `Selected ${ids.length} stroke${ids.length === 1 ? '' : 's'}.` : 'The lasso did not contain a stroke.');
       } else this.hooks.toast('Lasso was too small or narrow. Try a wider loop.');
@@ -211,21 +215,34 @@ export class InteractionController {
   private beginErase(points: Point[], size: Size, now: number, settings: Settings): void {
     const point = this.eraserPoint(points, size, now, settings);
     const brush: Brush = { tool: 'eraser', color: '#000000', size: settings.palmEraserSize, opacity: 1 };
-    this.eraserId = crypto.randomUUID();
-    this.hooks.send({ type: 'begin', id: this.eraserId, brush, point });
+    this.erasing = true; this.erasedObjects.clear();
+    if (this.eraseObject(point, settings.palmEraserSize)) this.shapeErasePoint = point;
+    else {
+      this.eraserId = crypto.randomUUID(); this.hooks.send({ type: 'begin', id: this.eraserId, brush, point });
+    }
     this.diagnostics.interaction = 'erase'; this.diagnostics.mappedPoint = point;
     this.hooks.showPointer(point, settings.palmEraserSize, true, 'E');
   }
   private continueErase(points: Point[], size: Size, now: number, settings: Settings): void {
-    if (!this.eraserId) return;
     const point = this.eraserPoint(points, size, now, settings);
-    this.hooks.send({ type: 'point', id: this.eraserId, point });
+    const hit = this.eraseObject(point, settings.palmEraserSize);
+    if (hit && !this.eraserId) this.shapeErasePoint = point;
+    if (!this.eraserId && !hit && (!this.shapeErasePoint || Math.hypot(point.x - this.shapeErasePoint.x, point.y - this.shapeErasePoint.y) > settings.palmEraserSize * 0.6)) {
+      this.eraserId = crypto.randomUUID();
+      this.shapeErasePoint = null;
+      this.hooks.send({ type: 'begin', id: this.eraserId, brush: { tool: 'eraser', color: '#000000', size: settings.palmEraserSize, opacity: 1 }, point });
+    } else if (this.eraserId) this.hooks.send({ type: 'point', id: this.eraserId, point });
     this.diagnostics.interaction = 'erase'; this.diagnostics.mappedPoint = point;
     this.hooks.showPointer(point, settings.palmEraserSize, true, 'E');
   }
   private endErase(): void {
     if (this.eraserId) this.hooks.send({ type: 'end', id: this.eraserId });
-    this.eraserId = null; this.palmFilter.reset(); this.diagnostics.interaction = 'hover';
+    this.eraserId = null; this.erasing = false; this.shapeErasePoint = null; this.palmFilter.reset(); this.diagnostics.interaction = 'hover';
+  }
+  private eraseObject(point: Point, diameter: number): boolean {
+    const object = nearestObject(currentObjects(this.hooks.getState().history), point, diameter / 2);
+    if (object && !this.erasedObjects.has(object.id)) { this.erasedObjects.add(object.id); this.hooks.send({ type: 'delete-object', id: object.id }); }
+    return !!object;
   }
   private fistPoint(points: Point[], size: Size, now: number, settings: Settings): Point {
     this.fistFilter.alpha = settings.smoothing;
@@ -233,14 +250,15 @@ export class InteractionController {
   }
   private beginDrag(points: Point[], size: Size, now: number, settings: Settings): void {
     const point = this.fistPoint(points, size, now, settings);
-    const state = this.hooks.getState(), strokes = currentStrokes(state.history);
-    let ids = state.selection.filter(id => strokes.some(stroke => stroke.id === id && stroke.brush.tool !== 'eraser'));
+    const state = this.hooks.getState(), strokes = currentStrokes(state.history), objects = currentObjects(state.history);
+    let ids = state.selection.filter(id => strokes.some(stroke => stroke.id === id && stroke.brush.tool !== 'eraser') || objects.some(object => object.id === id));
     if (ids.length) {
-      const selected = strokes.filter(stroke => ids.includes(stroke.id)), box = bounds(selected.flatMap(stroke => stroke.points)), padding = 12;
+      const selected = strokes.filter(stroke => ids.includes(stroke.id)), selectedObjects = objects.filter(object => ids.includes(object.id));
+      const box = bounds([...selected.flatMap(stroke => stroke.points), ...selectedObjects.flatMap(object => [{ x: object.x, y: object.y }, { x: object.x + object.width, y: object.y + object.height }])]), padding = 12;
       const insideSelection = point.x >= box.minX - padding && point.x <= box.maxX + padding && point.y >= box.minY - padding && point.y <= box.maxY + padding;
-      if (!insideSelection && !nearestStroke(strokes, point, settings.fistGrabRadius, ids)) { this.blockedPose = 'fist'; this.fistFilter.reset(); return; }
+      if (!insideSelection && !nearestStroke(strokes, point, settings.fistGrabRadius, ids) && !nearestObject(objects, point, settings.fistGrabRadius, ids)) { this.blockedPose = 'fist'; this.fistFilter.reset(); return; }
     } else {
-      const nearest = nearestStroke(strokes, point, settings.fistGrabRadius);
+      const nearest = nearestObject(objects, point, settings.fistGrabRadius) ?? nearestStroke(strokes, point, settings.fistGrabRadius);
       if (!nearest) { this.blockedPose = 'fist'; this.fistFilter.reset(); return; }
       ids = [nearest.id]; this.hooks.send({ type: 'select', ids });
     }

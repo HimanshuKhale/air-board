@@ -20,7 +20,13 @@ import { initialState, defaults } from './core/settings';
 import { loadHandSettings, saveHandSettings } from './calibration/storage';
 import { PlaneMapper } from './calibration/homography';
 import { drawInteractionOverlay } from './ui/interaction-overlay';
-import { currentStrokes } from './drawing/history';
+import { currentObjects, currentStrokes } from './drawing/history';
+import { recognizeStroke } from './drawing/recognition';
+import { paintObject } from './drawing/objects';
+import type { BoardObject } from './core/types';
+import { SpeechController } from './ai/speech';
+import { parseCommand } from './ai/commands';
+import { executeIntent } from './ai/execute';
 
 const isPresentation = location.pathname === '/present';
 document.body.classList.toggle('is-presentation', isPresentation);
@@ -40,6 +46,8 @@ const overlayContext = overlayCanvas.getContext('2d')!;
 const background = new BackgroundRenderer(video);
 const initial = initialState(); initial.settings = loadHandSettings(defaults());
 const bus = new BoardChannel(initial);
+bus.onRejected = (requestId, reason) => { if (aiRequestIds.delete(requestId)) { aiStatus(`${reason}. Please repeat the command.`); aiLog(`Skipped: ${reason}.`); } };
+const speech = new SpeechController();
 const camera = new CameraSession(video, bus, isPresentation ? 'Presentation' : 'Studio');
 const pipelineDebug = new PipelineDebug(camera);
 const input = new InputRouter(drawing.canvas, bus);
@@ -70,6 +78,54 @@ let lastTracking = 0, inferenceMs = 0, backgroundDirty = true, debug = false, co
 let toastTimer = 0, lastMetrics = 0, lastPointerTime = 0;
 let previousGeometry = '';
 let previousPaused = bus.state.settings.paused;
+let lastAiActionPosition = -1;
+const aiRequestIds = new Set<string>();
+const recentTranscripts = new Map<string, number>();
+const aiStatus = (message: string) => { el('ai-status').textContent = message; };
+const aiLog = (message: string) => { const row = document.createElement('li'); row.textContent = message; el('ai-log').prepend(row); while (el('ai-log').children.length > 20) el('ai-log').lastElementChild?.remove(); };
+function runVoiceCommand(text: string, requestId = crypto.randomUUID()): void {
+  if (el<HTMLSelectElement>('ai-mode').value !== 'commands') return;
+  const key = text.trim().toLocaleLowerCase();
+  if (!key || Date.now() - (recentTranscripts.get(key) ?? 0) < 15000) return;
+  const intent = parseCommand(text, el<HTMLInputElement>('command-mode').checked);
+  if (!intent) { aiStatus('No supported explicit command found. Say “AirBoard” first or enable Command Mode.'); return; }
+  try {
+    aiRequestIds.add(requestId);
+    const message = executeIntent(bus, intent, requestId, () => window.confirm('Clear the entire board? This can be undone.'));
+    recentTranscripts.set(key, Date.now()); aiStatus(message); aiLog(message);
+  } catch (error) { aiRequestIds.delete(requestId); aiStatus(error instanceof Error ? error.message : 'Command failed.'); }
+}
+speech.onStatus = aiStatus;
+speech.onTranscript = event => {
+  el('ai-transcript').textContent = `${event.type === 'interim' ? 'Hearing' : 'Heard'}: ${event.text}`;
+  if (event.type === 'final') runVoiceCommand(event.text);
+};
+document.addEventListener('click', event => {
+  if ((event.target as Element).closest('[data-action="voice-panel"]')) el('voice-panel').hidden = !el('voice-panel').hidden;
+});
+el('voice-close').addEventListener('click', () => { el('voice-panel').hidden = true; });
+el('mic-toggle').addEventListener('click', async () => {
+  if (speech.listening) { speech.stop(); el('mic-toggle').textContent = 'Start microphone'; return; }
+  if (el<HTMLSelectElement>('ai-mode').value !== 'commands') { aiStatus('Choose Commands mode first.'); return; }
+  try { await speech.start(); el('mic-toggle').textContent = 'Stop microphone'; }
+  catch (error) { speech.stop(); aiStatus(error instanceof Error ? error.message : 'Microphone unavailable.'); }
+});
+el('ai-mode').addEventListener('change', () => { if (el<HTMLSelectElement>('ai-mode').value !== 'commands') { speech.stop(); el('mic-toggle').textContent = 'Start microphone'; } });
+el('send-command').addEventListener('click', () => runVoiceCommand(el<HTMLInputElement>('typed-command').value));
+el('typed-command').addEventListener('keydown', event => { if (event.key === 'Enter') runVoiceCommand(el<HTMLInputElement>('typed-command').value); });
+el('undo-ai').addEventListener('click', () => {
+  if (lastAiActionPosition < 0 || bus.state.history.position !== lastAiActionPosition) { aiStatus('Undo newer board actions first, then try Undo Last AI Action.'); return; }
+  bus.send({ type: 'undo' }); lastAiActionPosition = -1; aiStatus('Undid last AI action.');
+});
+let pendingShape: { strokeId: string; object: BoardObject; confidence: number } | null = null;
+let shapeTimer = 0;
+function dismissShape(): void { pendingShape = null; clearTimeout(shapeTimer); el('shape-suggestion').hidden = true; }
+function acceptShape(): void {
+  const candidate = pendingShape; dismissShape();
+  if (candidate) bus.send({ type: 'replace-stroke', strokeId: candidate.strokeId, object: candidate.object });
+}
+el('shape-convert').addEventListener('click', acceptShape);
+el('shape-keep').addEventListener('click', dismissShape);
 const cursor = el<HTMLDivElement>('hand-cursor');
 function toast(message: string): void {
   const target = el('toast'); target.textContent = message; target.classList.add('visible');
@@ -128,8 +184,25 @@ bindControls(bus, {
   calibrateStylus: () => interactions.startStylusCalibration(),
   resetStylus: () => interactions.resetStylusCalibration(),
 });
-bus.onChange = command => {
+bus.onChange = (command, requestId) => {
   drawing.invalidate(!command || !['begin', 'point'].includes(command.type));
+  if (requestId && aiRequestIds.delete(requestId) && command && !['select', 'undo', 'redo'].includes(command.type)) lastAiActionPosition = bus.state.history.position;
+  if (command?.type === 'replace-stroke' && pendingShape?.strokeId === command.strokeId) dismissShape();
+  if (command?.type === 'end' && bus.state.settings.smartShapes) {
+    const action = bus.state.history.actions.at(bus.state.history.position - 1);
+    if (action?.kind === 'stroke' && action.stroke.id === command.id) {
+      const match = recognizeStroke(action.stroke);
+      if (match) {
+        dismissShape(); pendingShape = { strokeId: action.stroke.id, ...match };
+        el('shape-suggestion-label').textContent = `Clean ${match.object.type}?`;
+        el('shape-suggestion').hidden = false;
+        shapeTimer = window.setTimeout(() => {
+          if (bus.leader && bus.state.settings.autoConvertShapes && match.confidence >= 0.9) acceptShape();
+          else dismissShape();
+        }, 3000);
+      }
+    }
+  }
   if (!command || command.type === 'settings') {
     backgroundDirty = true;
     void background.setImage(bus.state.settings.background.image).then(() => { backgroundDirty = true; }).catch(() => toast('This background image could not be decoded.'));
@@ -201,7 +274,7 @@ document.querySelectorAll<HTMLInputElement>('#debug-toggle,[data-pipeline-debug]
 document.addEventListener('visibilitychange', () => { if (document.hidden) { releaseHand(); input.end(); } });
 window.addEventListener('blur', releaseHand);
 navigator.mediaDevices?.addEventListener('devicechange', () => { void listCameras(); });
-window.addEventListener('pagehide', () => { camera.close(); bus.close(); }, { once: true });
+window.addEventListener('pagehide', () => { speech.stop(); camera.close(); bus.close(); }, { once: true });
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
 let frame = 0;
 function render(now: number): void {
@@ -210,7 +283,8 @@ function render(now: number): void {
   if (backgroundDirty || (s.background.mode === 'camera' && camera.camera.stream)) { background.draw(backgroundContext, s.background); backgroundDirty = false; }
   drawing.render(bus.state.history);
   overlayContext.clearRect(0, 0, BOARD.width, BOARD.height);
-  drawInteractionOverlay(overlayContext, interactions.visuals, currentStrokes(bus.state.history, interactions.visuals.movePreview), bus.state.selection);
+  drawInteractionOverlay(overlayContext, interactions.visuals, currentStrokes(bus.state.history, interactions.visuals.movePreview), bus.state.selection, currentObjects(bus.state.history, interactions.visuals.movePreview));
+  if (pendingShape) { overlayContext.save(); overlayContext.globalAlpha = 0.55; paintObject(overlayContext, pendingShape.object); overlayContext.restore(); }
   if (hand && now - lastTracking > 250) releaseHand();
   if (now - lastPointerTime > 1800) cursor.hidden = true;
   const calibrating = el<HTMLDialogElement>('settings-dialog').open;

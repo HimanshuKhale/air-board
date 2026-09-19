@@ -1,5 +1,6 @@
 import { BOARD, type HistoryState, type Stroke } from '../core/types';
-import { currentStrokes, type MovePreview } from './history';
+import { currentScene, type MovePreview } from './history';
+import { paintObject } from './objects';
 export function paintStroke(ctx: CanvasRenderingContext2D, stroke: Stroke): void {
   if (!stroke.points.length) return;
   const { points, brush } = stroke;
@@ -41,13 +42,17 @@ export class DrawingEngine {
     if (!this.dirty) return;
     if (this.movePreview) {
       this.context.clearRect(0, 0, BOARD.width, BOARD.height);
-      for (const stroke of currentStrokes(history, this.movePreview)) paintStroke(this.context, stroke);
+      const scene = currentScene(history, this.movePreview);
+      for (const stroke of scene.strokes) paintStroke(this.context, stroke);
+      for (const object of scene.objects) paintObject(this.context, object);
       this.dirty = false; return;
     }
     if (this.historyDirty) {
       this.cache.clearRect(0, 0, BOARD.width, BOARD.height);
       const committed = { ...history, active: null };
-      for (const stroke of currentStrokes(committed)) paintStroke(this.cache, stroke);
+      const scene = currentScene(committed);
+      for (const stroke of scene.strokes) paintStroke(this.cache, stroke);
+      for (const object of scene.objects) paintObject(this.cache, object);
     }
     // One transparent scratch composition per frame prevents highlighter opacity buildup.
     this.context.clearRect(0, 0, BOARD.width, BOARD.height);

@@ -2,7 +2,7 @@
 
 A local hand-controlled teaching whiteboard for Windows. Pinch to draw, open a palm to erase, point to lasso, form a fist to move strokes, and bring two hands together to pause or resume hand control. Mouse and touch work alongside hand input.
 
-Built with Vite, TypeScript, Canvas and MediaPipe Hand Landmarker. No React, backend, database, authentication, API key, remote inference, analytics or runtime CDN.
+Built with Vite, TypeScript, Canvas and MediaPipe Hand Landmarker. Core drawing and gestures remain local. An optional loopback Node speech service can transcribe microphone segments; it is separate from camera and board processing. No React, database, authentication, analytics or runtime CDN.
 
 ## Run on this laptop
 
@@ -29,6 +29,25 @@ Install automatically:
 4. Bundles a local classic inference worker.
 
 The first setup needs internet. Afterward runtime works offline while the localhost server is running. No model download occurs when the cached checksum matches. Do not open index.html directly using file://.
+
+## AirBoard Intelligence V1
+
+Smart Shapes is on by default. Draw a rough line, rectangle, ellipse, triangle or arrow with mouse, touch or pinch. A translucent clean preview appears for three seconds. Choose **Convert** to replace the rough stroke with an editable native object, or **Keep ink**. Undo after conversion restores the original stroke. Settings can disable suggestions or enable delayed automatic conversion for high-confidence matches. Small marks, highlighter and eraser strokes are excluded; geometry alone cannot reliably distinguish a large handwritten O from a circle, so automatic conversion is off by default.
+
+Native objects include lines, rectangles, ellipses, triangles, arrows, text and connectors. Shift-drag an object with the mouse, lasso it with the index gesture, or grab it with a fist. The eraser deletes an entire native object when it hits one; it still removes freehand pixels with `destination-out`. Undo restores deleted objects. Connectors created by commands follow their endpoint boxes when those boxes move. All objects export to PNG and synchronize to Presentation.
+
+Voice commands need an explicit **Commands** mode. Open **Voice** in either window. Typed commands work without the speech service. To test transcription locally, start a second PowerShell terminal:
+
+```powershell
+cd E:\SAAI_AirBoard\hand-sign-projection
+npm.cmd run ai:mock
+```
+
+Click **Start microphone** to grant audio permission. The mock service returns a fixed transcript for testing. For live speech, copy `.env.example` to `.env`, set `AIRBOARD_STT_PROVIDER=openai` and `OPENAI_API_KEY` in that server-only file, then run `npm.cmd run ai` instead of `ai:mock`. `.env` is ignored by Git. The browser sends five-second audio segments only while listening; with OpenAI selected, the local service forwards those segments to OpenAI. Interim text is displayed, while only final text can change the board. Stop microphone to cancel requests and release audio tracks. No camera frame, screenshot or whole-board image is sent.
+
+Say or type: `AirBoard, ek rectangle banao`, `AirBoard, teen boxes banao`, or `AirBoard, create a flowchart with data collection, model training and deployment`. Select a box and use Command Mode for `Is box ko database naam do`; named boxes can be connected, recolored, moved or resized. Clear requires confirmation. The deterministic command parser recognizes a bounded English, Hindi and Hinglish vocabulary; unrecognized or ambiguous phrases leave the board alone. Automatic speech-to-diagram is present as a tested planning scaffold but deliberately disabled in the UI. Real Hindi/Hinglish microphone accuracy remains to be tested on your equipment.
+
+The optional Node service binds only to `127.0.0.1:8787`, caps input at 512 KB per segment, allows 12 requests per minute and 100 per day by default, and times out after 15 seconds. `AIRBOARD_DAILY_REQUEST_LIMIT` can lower the daily cap. It does not provide a monetary hard cap; set a project spending limit with the provider. The selected `gpt-transcribe` model is listed at about **US$0.0045 per audio minute** in [OpenAI's model documentation](https://developers.openai.com/api/docs/models/gpt-transcribe); 100 five-second segments would be about US$0.038, assuming each segment is five seconds. The service keeps counters in memory, so restarting it resets them. Core drawing works with the service stopped.
 
 ## Production/offline serving
 
@@ -103,13 +122,13 @@ Unit tests cover gesture geometry and timing, homography, lasso selection, neare
 
 **Automated passes do not mean your webcam has been validated.** Complete [docs/MANUAL_TEST_CHECKLIST.md](docs/MANUAL_TEST_CHECKLIST.md) before a class, especially pinch reliability, tracking loss/reacquisition, mirror alignment, latency, camera switching, second-monitor fullscreen, screen sharing and offline operation. No separate lint configuration is present; strict TypeScript checks include unused code.
 
-This delivery passed 54 unit tests and 12 headless Edge integration tests. See [docs/VERIFICATION.md](docs/VERIFICATION.md), [camera diagnostics](docs/CAMERA_PIPELINE_DIAGNOSTICS.md), and the [M2â€“M5 design record](docs/M2_M5.md).
+The original baseline passed 54 unit tests and 12 headless Edge integration tests. Current results are reported in the development handoff. See [docs/VERIFICATION.md](docs/VERIFICATION.md), [camera diagnostics](docs/CAMERA_PIPELINE_DIAGNOSTICS.md), and the [M2â€“M5 design record](docs/M2_M5.md).
 
 ## Privacy
 
 > Camera processing happens locally on this device. Video is not uploaded or recorded.
 
-There is no audio capture. No video recording, frame persistence, external telemetry or cloud account. Only an intentional camera-background export saves a webcam frame as part of your PNG. Images and drawing state remain in browser memory and are shared only across this application's same-origin windows. Setup downloads packages/model; normal runtime requests only localhost assets.
+Audio capture occurs only after **Start microphone**. With the optional OpenAI service configured, audio segments are sent to OpenAI for transcription. The camera and board stay local. No video recording, frame persistence, external telemetry or cloud account is built into AirBoard. Only an intentional camera-background export saves a webcam frame as part of your PNG. Images and drawing state remain in browser memory and are shared only across this application's same-origin windows. Setup downloads packages/model; ordinary drawing runtime requests only localhost assets.
 
 See [asset provenance](docs/THIRD_PARTY_ASSETS.md) and public/asset-manifest.json for original URLs, pinned model checksum and runtime hashes.
 

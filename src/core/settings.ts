@@ -7,5 +7,6 @@ export const defaults = (): Settings => ({
   dominantHand: 'Right', gestureSensitivity: 'balanced', openPalmHoldMs: 200, palmEraserSize: 72,
   inputMode: 'finger', stylusOffset: { x: 0, y: 0 },
   planePoints: null, lassoCloseRadius: 55, fistGrabRadius: 70, twoHandHoldMs: 500, twoHandProximity: 0.22,
+  smartShapes: true, autoConvertShapes: false,
 });
 export const initialState = (): BoardState => ({ settings: defaults(), history: { actions: [], position: 0, active: null }, selection: [] });

@@ -71,6 +71,7 @@ export function bindControls(bus: BoardChannel, actions: ControlsActions): void 
       case 'dim': sendSettings({ background: { ...s.background, dim: Number(input.value) } }); break;
       case 'positionX': case 'positionY': sendSettings({ background: { ...s.background, [name]: Number(input.value) } }); break;
       case 'autoHide': sendSettings({ autoHide: input.checked }); break;
+      case 'smartShapes': case 'autoConvertShapes': sendSettings({ [name]: input.checked }); break;
       case 'dominantHand': sendSettings({ dominantHand: input.value as Settings['dominantHand'] }); break;
       case 'inputMode': sendSettings({ inputMode: input.value as Settings['inputMode'] }); break;
       case 'gestureSensitivity': sendSettings({ gestureSensitivity: input.value as Settings['gestureSensitivity'] }); break;
@@ -119,7 +120,7 @@ export function updateControls(bus: BoardChannel): void {
     const key = input.dataset.setting!;
     const values: Record<string, string | number | boolean> = { ink: s.brush.color, size: s.brush.size, opacity: s.brush.opacity, 'board-color': s.background.color,
       fit: s.background.fit, mirror: s.background.mirror, dim: s.background.dim, positionX: s.background.positionX, positionY: s.background.positionY, smoothing: s.smoothing, pinchClose: s.pinchClose, pinchOpen: s.pinchOpen, debounceMs: s.debounceMs, autoHide: s.autoHide,
-      dominantHand: s.dominantHand, inputMode: s.inputMode, gestureSensitivity: s.gestureSensitivity, openPalmHoldMs: s.openPalmHoldMs, palmEraserSize: s.palmEraserSize, lassoCloseRadius: s.lassoCloseRadius, fistGrabRadius: s.fistGrabRadius, twoHandHoldMs: s.twoHandHoldMs, twoHandProximity: s.twoHandProximity };
+      dominantHand: s.dominantHand, inputMode: s.inputMode, gestureSensitivity: s.gestureSensitivity, openPalmHoldMs: s.openPalmHoldMs, palmEraserSize: s.palmEraserSize, lassoCloseRadius: s.lassoCloseRadius, fistGrabRadius: s.fistGrabRadius, twoHandHoldMs: s.twoHandHoldMs, twoHandProximity: s.twoHandProximity, smartShapes: s.smartShapes, autoConvertShapes: s.autoConvertShapes };
     if (input.type === 'checkbox') input.checked = Boolean(values[key]);
     else if (String(values[key]) !== input.value) input.value = String(values[key]);
   });

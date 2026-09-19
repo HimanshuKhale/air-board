@@ -3,5 +3,8 @@ dist/
 test-results/
 playwright-report/
 *.log
+.env
+.env.*
+!.env.example
 public/vendor/
 public/models/*.task

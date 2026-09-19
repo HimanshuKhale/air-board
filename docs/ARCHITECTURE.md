@@ -2,7 +2,7 @@
 
 ## Boundaries and runtime
 
-A Vite/TypeScript browser application with no backend, accounts, database, analytics or remote inference. Both routes serve the same entry point: `/` or `/studio` creates Studio; `/present` creates Presentation. Chrome/Edge on Windows with Web Locks, BroadcastChannel, Canvas, workers and getUserMedia is the supported MVP environment. All runtime URLs are same-origin localhost. Use one exact origin for both windows.
+A Vite/TypeScript browser application with an optional loopback Node speech service, no accounts, database or analytics. Both routes serve the same entry point: `/` or `/studio` creates Studio; `/present` creates Presentation. Chrome/Edge on Windows with Web Locks, BroadcastChannel, Canvas, workers and getUserMedia is the supported MVP environment. Keep both board windows on one exact origin. The speech service is separate at `127.0.0.1:8787` and can be stopped without affecting drawing.
 
 The drawing engine takes generic points and brush styles. It imports no MediaPipe types. The landmark adapter, gesture state machine, coordinate functions, rendering engine and synchronization protocol are independent modules.
 
@@ -65,7 +65,11 @@ Four concepts are separated:
 
 Pen and highlighter paths use midpoint quadratic interpolation, continuous paths, and round caps/joins. A tap is a dot. An active stroke is rendered as a single path each dirty frame, so overlapping samples do not repeatedly accumulate highlighter alpha. Highlighter uses 28% of configured opacity; separate passes may darken intentionally. Eraser uses destination-out and actually removes drawing alpha.
 
-History stores points and style once per stroke, plus clear and move actions. One move stores selected IDs and a single x/y delta, preserving stroke IDs and brushes. Undo/redo move a history cursor and rebuild the committed cache. Eraser operations replay in order. A new committed action after undo truncates the redo branch. Clear is explicit and undoable. Active strokes and drag previews are not full-resolution bitmap histories.
+History stores points and style once per stroke, plus clear, move, native-object create/update/delete, stroke replacement and atomic diagram actions. One move stores selected IDs and a single x/y delta, preserving IDs and brushes. Undo/redo move a history cursor and rebuild the committed cache. Eraser strokes still use `destination-out` to remove freehand pixels. Hitting a native object deletes that whole object as a reversible action; it never paints background color. A new committed action after undo truncates the redo branch. Clear is explicit and undoable. Active strokes and drag previews are not full-resolution bitmap histories.
+
+Native objects have stable IDs, one of seven kinds (line, rectangle, ellipse, triangle, arrow, text, connector), bounded x/y/width/height on the 1600 by 900 logical board, color, stroke width and text. Connectors may reference two node IDs; the drawing scene derives connector geometry from current endpoint positions, so linked connectors follow moved boxes and disappear while an endpoint is deleted. Manually moving a linked connector detaches it. Objects render onto the same transparent drawing canvas used by PNG export. Existing stroke-only snapshots remain accepted; missing Smart Shapes settings receive defaults on snapshot import. The current snapshot channel remains `v:1` because no top-level state field was added.
+
+Smart Shapes uses deterministic resampling, closure, path length, straightness, perimeter fit and corner coverage. It runs once on a completed pen stroke, never on video frames. Small/ambiguous marks stay ink. A preview gives three seconds to convert or keep; optional delayed auto-conversion is off by default. A large handwritten O can be geometrically indistinguishable from a circle, so the presenter remains responsible for accepting it.
 
 ## Window synchronization
 
@@ -74,6 +78,14 @@ A second exclusive Web Lock, `saai-airboard-board`, elects the command sequencer
 UI controls update through the same reducer. Settings include tool/brush, background/image, mirror/fit/dimming, pinch calibration, pause and auto-hide. Debug toggles stay local to each window so Studio debugging does not expose diagnostics in the shared window. Camera status is a lightweight heartbeat, not video.
 
 Commands carry unique request IDs and are acknowledged by the ordered event stream. Unacknowledged commands retry across leader handover; a bounded set of recent applied IDs accompanies snapshots to prevent duplicate undo/clear operations. Mouse press heartbeats keep a stationary held mouse stroke alive without storing redundant points. Hand-loss cancellation affects only hand-owned input, so a missing hand cannot interrupt mouse drawing.
+
+AI diagram commands use a stable request ID and base document revision. Only the existing Web-Lock leader sequences them. A stale diagram command is rejected and must be repeated against the current board. One accepted plan is one `diagram` history action. The version-1 plan schema admits only bounded node labels, known shape kinds, known layouts and edges with existing plan IDs. The renderer receives native objects, never HTML, external images or executable content. Deterministic layout searches for a free rectangle around existing native objects and freehand ink; it preserves manual positions. Attached connectors retain relationships when nodes move.
+
+## Optional speech service and automatic planning boundary
+
+`server/ai.mjs` is a dependency-free Node HTTP service bound to loopback. It accepts only WebM/Ogg audio under 512 KB, limits to 12 requests per minute and a configurable 100 per day by default, cancels/aborts at 15 seconds, checks the board origin and logs only status plus short request IDs. The provider interface has `mock` and `openai` implementations. The OpenAI provider holds `OPENAI_API_KEY` server-side and calls `gpt-transcribe` with English/Hindi language hints and technical keywords. The selected model's [official documentation](https://developers.openai.com/api/docs/models/gpt-transcribe) explicitly supports multilingual and code-switching hints and streaming file transcripts. The browser records complete five-second segments, displays interim deltas, and acts only on final text. This chunked approach has more latency than the provider's dedicated Realtime transcription path. Live Hindi and Hinglish quality has not been verified without credentials and a real microphone.
+
+`parseCommand` covers explicit English, Hindi and Hinglish commands after the AirBoard wake phrase or while Command Mode is enabled. Object references resolve against selection and actual labels; ambiguous names fail instead of guessing. Clear requires a confirmation dialog. Transcripts are deduplicated for a short window, and a network failure leaves history unchanged. Camera ownership and microphone tracks are independent. The UI exposes Off and Commands; Automatic is disabled. `AutomaticPlanner` has context/revision/selection inputs, topic continuity, bounded recent segments, duplicate suppression and suggestion output only. It never mutates the board. Autonomous commits need real audio evaluation, ambiguity policy and interruption testing before enabling that mode.
 
 A single active stroke is accepted at a time. Simultaneous hands/mouse in multiple windows are deliberately not collaborative drawing. This application is one teacher's local board.
 
@@ -87,7 +99,7 @@ Image alignment is stored as horizontal/vertical fractions from 0 to 1, defaulti
 
 ## Privacy and asset provenance
 
-No API keys or external services. The page's content security policy restricts runtime resources to the app origin, with data/blob images and development-only localhost HMR WebSocket. Production preview has no HMR. Model/runtime sources and hashes are in `public/asset-manifest.json` and `docs/THIRD_PARTY_ASSETS.md`. Setup is the only model download; a pinned SHA-256 checks it. Runtime files are copied into public and then dist, never loaded from a CDN.
+No API key is bundled in the browser. The page's content security policy permits only the app origin, the specific loopback speech service, data/blob images and the development-only localhost HMR WebSocket. Production preview has no HMR. Camera frames, board images and backgrounds are not sent to the speech service. The service sends audio to OpenAI only after explicit microphone start with the OpenAI provider configured. Model/runtime sources and hashes are in `public/asset-manifest.json` and `docs/THIRD_PARTY_ASSETS.md`. Setup is the only MediaPipe model download; a pinned SHA-256 checks it. Runtime files are copied into public and then dist, never loaded from a CDN.
 
 ## Extension points
 
@@ -95,6 +107,6 @@ No API keys or external services. The page's content security policy restricts r
 - PointerFilter can be replaced without changing MediaPipe or brush rendering.
 - Optional gesture shortcuts can sit beside the authoritative pinch controller.
 - BackgroundRenderer can add graph paper/grid providers using the same compositor.
-- Stroke rendering/history can gain pressure, shapes and checkpoint caching.
+- Stroke rendering/history can gain pressure and checkpoint caching.
 - Board dimensions could become a session property, with explicit rescaling and protocol versioning.
 - Durable board formats and session restore require an explicit future product decision; current exports are PNG only.

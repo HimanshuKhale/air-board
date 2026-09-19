@@ -1,7 +1,7 @@
 import type { Point, Settings } from '../core/types';
 import { homographyFromQuad } from './homography';
 export const HAND_SETTINGS_KEY = 'saai-airboard-hand-settings-v1';
-type Stored = Pick<Settings, 'dominantHand' | 'gestureSensitivity' | 'inputMode' | 'stylusOffset' | 'openPalmHoldMs' | 'palmEraserSize' | 'planePoints' | 'lassoCloseRadius' | 'fistGrabRadius' | 'twoHandHoldMs' | 'twoHandProximity'>;
+type Stored = Pick<Settings, 'dominantHand' | 'gestureSensitivity' | 'inputMode' | 'stylusOffset' | 'openPalmHoldMs' | 'palmEraserSize' | 'planePoints' | 'lassoCloseRadius' | 'fistGrabRadius' | 'twoHandHoldMs' | 'twoHandProximity' | 'smartShapes' | 'autoConvertShapes'>;
 export function loadHandSettings(base: Settings): Settings {
   try {
     const value = JSON.parse(localStorage.getItem(HAND_SETTINGS_KEY) ?? '{}') as Partial<Stored>;
@@ -16,6 +16,8 @@ export function loadHandSettings(base: Settings): Settings {
     if (typeof value.twoHandHoldMs === 'number' && value.twoHandHoldMs >= 400 && value.twoHandHoldMs <= 600) base.twoHandHoldMs = value.twoHandHoldMs;
     if (typeof value.twoHandProximity === 'number' && value.twoHandProximity >= .08 && value.twoHandProximity <= .5) base.twoHandProximity = value.twoHandProximity;
     if (validStoredPoints(value.planePoints)) base.planePoints = value.planePoints;
+    if (typeof value.smartShapes === 'boolean') base.smartShapes = value.smartShapes;
+    if (typeof value.autoConvertShapes === 'boolean') base.autoConvertShapes = value.autoConvertShapes;
   } catch { /* Corrupt local preferences fall back to safe defaults. */ }
   return base;
 }
@@ -27,6 +29,6 @@ const validStoredPoints = (value: unknown): value is Point[] | null => {
 export function saveHandSettings(settings: Settings): void {
   const value: Stored = { dominantHand: settings.dominantHand, gestureSensitivity: settings.gestureSensitivity, inputMode: settings.inputMode, stylusOffset: settings.stylusOffset, openPalmHoldMs: settings.openPalmHoldMs,
     palmEraserSize: settings.palmEraserSize, planePoints: settings.planePoints, lassoCloseRadius: settings.lassoCloseRadius, fistGrabRadius: settings.fistGrabRadius,
-    twoHandHoldMs: settings.twoHandHoldMs, twoHandProximity: settings.twoHandProximity };
+    twoHandHoldMs: settings.twoHandHoldMs, twoHandProximity: settings.twoHandProximity, smartShapes: settings.smartShapes, autoConvertShapes: settings.autoConvertShapes };
   try { localStorage.setItem(HAND_SETTINGS_KEY, JSON.stringify(value)); } catch { /* Storage can be unavailable in private mode. */ }
 }
