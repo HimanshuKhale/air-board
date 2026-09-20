@@ -1,4 +1,4 @@
-import { BOARD, type BoardState, type Brush, type Point, type ReactionEvent, type Settings, type Size } from '../core/types';
+import { BOARD, type BoardState, type Brush, type CutLine, type Point, type ReactionEvent, type Settings, type Size } from '../core/types';
 import type { Command } from '../sync/protocol';
 import type { TrackingResult } from '../tracking/protocol';
 import { GestureController } from '../input/gesture';
@@ -19,11 +19,11 @@ import type { BoardObject } from '../core/types';
 import { PenWritingController } from './pen-writing';
 import { ReactionController, type ReactionState } from '../reactions/controller';
 import { classifyReactionPose } from '../reactions/pose';
-import { classifyThreeFingerTransform, SpatialTransformController, type SpatialTransformState } from './three-finger-transform';
-import { ChopController, classifyChopPose, type ChopState } from './chop';
-import { subdivide } from '../drawing/subdivision';
+import { classifyFistManipulation, FistManipulationController, type FistManipulationState } from './fist-manipulation';
+import { classifyScissors, ScissorController, type ScissorState } from './scissors';
+import { cutObject } from '../drawing/cutting';
 
-export type InteractionMode = 'hover' | 'write' | 'erase' | 'lasso' | 'drag' | 'shape-transform' | 'spatial-transform' | 'cut-counting' | 'plane-calibration' | 'stylus-calibration';
+export type InteractionMode = 'hover' | 'write' | 'erase' | 'lasso' | 'drag' | 'shape-transform' | 'fist-manipulation' | 'scissor-cut' | 'plane-calibration' | 'stylus-calibration';
 export interface InteractionDiagnostics {
   dominantHand: 'Left' | 'Right'; detectedHands: string[]; instantaneousGesture: StaticGesture;
   stableGesture: StaticGesture; gestureEnterMs: number; interaction: InteractionMode;
@@ -33,7 +33,9 @@ export interface InteractionDiagnostics {
   confirmationGesture: ConfirmationPose; confirmationConfidence: number;
   writingHand: 'Left' | 'Right'; confirmationHand: 'Left' | 'Right'; penDown: boolean; fourFingertipConfidence: number;
   reactionState: ReactionState; reactionGesture: string; reactionConfidence: number;
-  spatialState: SpatialTransformState; chopState: ChopState; chopCount: number; spatialScale: number; spatialAngle: number;
+  spatialState: FistManipulationState; scissorState: ScissorState; spatialScale: number; spatialAngle: number;
+  fistConfidence: number; fistBaselineSize: number; fistCurrentSize: number; fistRejection: string | null;
+  scissorConfidence: number; scissorSeparation: number; cutGuide: CutLine | null; cutValid: boolean; cutRejection: string | null;
 }
 export interface InteractionHooks {
   send(command: Command): void;
@@ -51,7 +53,7 @@ export interface InteractionHooks {
   confirmationInterrupted?(): void;
   reaction?(event: ReactionEvent): void;
 }
-export interface InteractionVisuals { lasso: Point[]; lassoStart: Point | null; planeTarget: number | null; planeCaptured: Point[]; movePreview: MovePreview | null; objectPreview: BoardObject | null; objectPreviews: BoardObject[]; spatialLabel: string | null; chopCount: number; stylusTarget: boolean }
+export interface InteractionVisuals { lasso: Point[]; lassoStart: Point | null; planeTarget: number | null; planeCaptured: Point[]; movePreview: MovePreview | null; objectPreview: BoardObject | null; objectPreviews: BoardObject[]; spatialLabel: string | null; cutGuide: CutLine | null; cutValid: boolean; stylusTarget: boolean }
 
 export class InteractionController {
   pointer: HandPointer | null = null;
@@ -62,18 +64,21 @@ export class InteractionController {
     inputMode: 'finger', virtualNibPoint: null, twoHandClose: false, twoHandHeldMs: 0, confirmationGesture: 'neutral', confirmationConfidence: 0,
     writingHand: 'Right', confirmationHand: 'Left', penDown: false, fourFingertipConfidence: 0,
     reactionState: 'IDLE', reactionGesture: 'neutral', reactionConfidence: 0,
-    spatialState: 'IDLE', chopState: 'ARMED', chopCount: 0, spatialScale: 1, spatialAngle: 0,
+    spatialState: 'IDLE', scissorState: 'IDLE', spatialScale: 1, spatialAngle: 0,
+    fistConfidence: 0, fistBaselineSize: 0, fistCurrentSize: 0, fistRejection: null,
+    scissorConfidence: 0, scissorSeparation: 0, cutGuide: null, cutValid: false, cutRejection: null,
   };
-  readonly visuals: InteractionVisuals = { lasso: [], lassoStart: null, planeTarget: null, planeCaptured: [], movePreview: null, objectPreview: null, objectPreviews: [], spatialLabel: null, chopCount: 0, stylusTarget: false };
+  readonly visuals: InteractionVisuals = { lasso: [], lassoStart: null, planeTarget: null, planeCaptured: [], movePreview: null, objectPreview: null, objectPreviews: [], spatialLabel: null, cutGuide: null, cutValid: false, stylusTarget: false };
   private gesture = new GestureController();
   private pen = new PenWritingController();
   private pose = new PoseStabilizer();
   private twoHand = new TwoHandToggle();
   private reaction = new ReactionController();
-  private spatial = new SpatialTransformController();
-  private chop = new ChopController();
+  private fistManipulation = new FistManipulationController();
+  private scissors = new ScissorController();
   private spatialMode: Settings['objectGestureMode'] = 'move';
-  private cutPreview: { source: BoardObject; pieces: BoardObject[]; method: 'equal-length' | 'equal-area' | 'similar' } | null = null;
+  private cutPreview: { source: BoardObject; pieces: [BoardObject, BoardObject]; line: CutLine } | null = null;
+  private lastFistSize = 0;
   private palmFilter = new ExponentialFilter(0.55);
   private fistFilter = new ExponentialFilter(0.55);
   private eraserId: string | null = null;
@@ -123,9 +128,9 @@ export class InteractionController {
     } else {
       this.diagnostics.confirmationGesture = 'neutral'; this.diagnostics.confirmationConfidence = 0;
     }
-    if (confirmationPending && (this.spatial.state !== 'IDLE' || this.chop.count)) this.cancelSpatial();
+    if (confirmationPending && (this.fistManipulation.state !== 'IDLE' || this.scissors.state !== 'IDLE')) this.cancelSpatial();
     const externalWriting = !!this.hooks.getState().history.active;
-    const operationActive = !!this.shapeTransform || !!this.lasso.length || this.pen.down || this.erasing || !!this.drag || this.spatial.state === 'ACTIVE' || this.chop.count > 0 || externalWriting;
+    const operationActive = !!this.shapeTransform || !!this.lasso.length || this.pen.down || this.erasing || !!this.drag || this.fistManipulation.state === 'GRABBED' || this.scissors.state === 'GUIDE_ACTIVE' || externalWriting;
     const proximityClose = twoHandsClose(hands.map(hand => hand.landmarks), size, settings.twoHandProximity);
     const toggleHandControl = confirmationPending || operationActive ? false : this.twoHand.update(hands.map(hand => hand.landmarks), size, now, settings.twoHandHoldMs, settings.twoHandProximity);
     this.diagnostics.twoHandClose = confirmationPending ? false : proximityClose; this.diagnostics.twoHandHeldMs = this.twoHand.state.heldMs;
@@ -143,15 +148,23 @@ export class InteractionController {
     const calibrating = !!this.planeCapture || this.stylusCapture;
     const dominant = hands.find(hand => hand.name === settings.dominantHand && hand.landmarks.length === 21);
     const selectedObjects = currentObjects(this.hooks.getState().history).filter(object => this.hooks.getState().selection.includes(object.id));
-    if (settings.objectGestureMode !== 'move' && externalWriting) { this.reaction.suppress(); this.syncReactionDiagnostics(); return; }
-    if (settings.objectGestureMode !== 'move' && this.hooks.getState().selection.length && selectedObjects.length !== this.hooks.getState().selection.length) { this.reaction.suppress(); this.syncReactionDiagnostics(); return; }
-    const spatialArmed = !confirmationPending && !calibrating && (!proximityClose || this.spatial.state === 'ACTIVE') && settings.objectGestureMode !== 'move' && selectedObjects.length > 0 && selectedObjects.length === this.hooks.getState().selection.length;
-    if (spatialArmed) {
+    if (externalWriting && (settings.objectGestureMode === 'cut' || this.fistManipulation.state !== 'IDLE')) { this.reaction.suppress(); this.syncReactionDiagnostics(); return; }
+    const validNativeSelection = selectedObjects.length > 0 && selectedObjects.length === this.hooks.getState().selection.length && !selectedObjects.some(object => object.type === 'connector');
+    const fistPose = dominant ? classifyFistManipulation(dominant.landmarks, size) : null;
+    if (fistPose) { this.lastFistSize = fistPose.apparentSize; this.diagnostics.fistConfidence = fistPose.confidence; this.diagnostics.fistCurrentSize = fistPose.apparentSize; }
+    const fistArmed = !confirmationPending && !calibrating && validNativeSelection && settings.objectGestureMode !== 'cut' && (!!fistPose?.active || this.fistManipulation.state !== 'IDLE');
+    const cutArmed = !confirmationPending && !calibrating && settings.objectGestureMode === 'cut' && selectedObjects.length === 1 && this.hooks.getState().selection.length === 1;
+    if (fistArmed || cutArmed) {
       this.reaction.suppress(); this.syncReactionDiagnostics(); this.cancelBoardOperationsForSpatial();
-      if (!dominant) { this.cancelSpatial(); return; }
-      if (settings.objectGestureMode === 'cut') this.updateCut(dominant.landmarks, size, now, selectedObjects);
-      else if (settings.objectGestureMode === 'scale' || settings.objectGestureMode === 'rotate') this.updateSpatialTransform(dominant.landmarks, size, now, selectedObjects, settings.objectGestureMode);
+      if (!dominant) { this.cancelSpatialTracking(); return; }
+      if (cutArmed) this.updateScissorCut(dominant.landmarks, size, now, selectedObjects[0]);
+      else this.updateFistManipulation(fistPose!, size, now, selectedObjects);
       return;
+    }
+    if (settings.objectGestureMode === 'cut') {
+      this.reaction.suppress(); this.syncReactionDiagnostics();
+      this.diagnostics.cutRejection = this.hooks.getState().selection.length === 1 ? 'The selected item is not an eligible native object' : 'Cut mode requires exactly one selected object';
+      this.visuals.spatialLabel = 'WAITING FOR ONE OBJECT'; return;
     }
     if (confirmationPending || calibrating || proximityClose || !settings.reactionsEnabled) this.reaction.suppress();
     else {
@@ -306,58 +319,84 @@ export class InteractionController {
     this.hooks.endPinch();
     this.gesture.reset(); this.pen.reset(); this.pose.reset(); this.pointer = null;
   }
-  private updateSpatialTransform(points: Point[], size: Size, now: number, selected: BoardObject[], mode: 'scale' | 'rotate'): void {
-    if (selected.some(object => object.type === 'connector')) {
-      this.hooks.toast('Attached connectors cannot be transformed directly. Select their shapes instead.');
-      this.hooks.send({ type: 'settings', patch: { objectGestureMode: 'move' } }); return;
-    }
-    const settings = this.hooks.getState().settings;
-    const pose = classifyThreeFingerTransform(points, size), update = this.spatial.update(pose, selected, mode, now, {
-      holdMs: settings.spatialTransformHoldMs, gain: settings.spatialScaleGain, smoothing: settings.spatialSmoothing,
+  private updateFistManipulation(pose: ReturnType<typeof classifyFistManipulation>, size: Size, now: number, selected: BoardObject[]): void {
+    const settings = this.hooks.getState().settings, mapped = this.hooks.map(pose.anchor, size, settings);
+    const near = selected.some(object => !!nearestObject([object], mapped, settings.fistGrabRadius));
+    const update = this.fistManipulation.update(pose, mapped, selected, near, now, {
+      holdMs: settings.spatialTransformHoldMs, smoothing: settings.spatialSmoothing, scaleGain: settings.spatialScaleGain,
       scaleDeadZone: settings.spatialScaleDeadZone, rotationDeadZone: settings.spatialRotationDeadZoneDeg * Math.PI / 180,
+      nearSize: settings.fistDepthNear, farSize: settings.fistDepthFar, mode: settings.objectGestureMode,
     });
-    this.diagnostics.spatialState = this.spatial.state; this.diagnostics.spatialScale = update.scale; this.diagnostics.spatialAngle = update.angle;
-    this.diagnostics.interaction = 'spatial-transform';
-    this.visuals.spatialLabel = mode === 'scale' ? `${Math.round(update.scale * 100)}%` : `${update.angle >= 0 ? '+' : ''}${Math.round(update.angle * 180 / Math.PI)}°`;
+    Object.assign(this.diagnostics, { spatialState: this.fistManipulation.state, spatialScale: update.scale, spatialAngle: update.angle,
+      fistConfidence: pose.confidence, fistBaselineSize: this.fistManipulation.baselineSize, fistCurrentSize: pose.apparentSize, fistRejection: update.rejection });
+    this.diagnostics.interaction = 'fist-manipulation';
+    this.visuals.spatialLabel = this.fistManipulation.state === 'GRABBED'
+      ? `GRABBED  ${Math.round(update.scale * 100)}%  ${update.angle >= 0 ? '+' : ''}${Math.round(update.angle * 180 / Math.PI)}°`
+      : this.fistManipulation.state === 'CANDIDATE' ? 'HOLD FIST TO GRAB' : 'WAITING FOR FIST';
     if (update.preview) { this.visuals.objectPreviews = update.preview; this.hooks.previewObjects?.(update.preview); }
     if (update.commit) {
-      this.hooks.previewObjects?.(null); this.visuals.objectPreviews = []; this.visuals.spatialLabel = null;
-      this.hooks.send({ type: 'transform-objects', ...update.commit });
+      this.hooks.previewObjects?.(null); this.visuals.objectPreviews = []; this.hooks.send({ type: 'transform-objects', ...update.commit });
+      this.hooks.toast('Fist manipulation committed as one action.');
     }
-    const mapped = this.hooks.map(pose.anchor, size, settings);
-    this.hooks.showPointer(mapped, 22, this.spatial.state === 'ACTIVE', mode === 'scale' ? 'S' : 'R');
+    this.hooks.showPointer(mapped, settings.fistGrabRadius, this.fistManipulation.state === 'GRABBED', this.fistManipulation.state === 'GRABBED' ? 'G' : 'F');
   }
-  private updateCut(points: Point[], size: Size, now: number, selected: BoardObject[]): void {
-    this.diagnostics.interaction = 'cut-counting';
-    if (selected.length !== 1) { this.hooks.toast('Cut mode requires exactly one selected object.'); this.hooks.send({ type: 'settings', patch: { objectGestureMode: 'move' } }); return; }
-    const pose = classifyChopPose(points, size), update = this.chop.update(pose, size, now);
-    this.diagnostics.chopState = this.chop.state; this.diagnostics.chopCount = update.count; this.visuals.chopCount = update.count;
-    this.visuals.spatialLabel = `Cut count: ${update.count}`;
-    if (update.counted) {
-      this.hooks.toast(`Cut count: ${update.count}`);
-      if (update.count >= 2) {
-        const scene = currentObjects(this.hooks.getState().history);
-        const attached = scene.some(object => object.type === 'connector' && (object.fromId === selected[0].id || object.toId === selected[0].id));
-        const result = attached ? null : subdivide(selected[0], update.count);
-        this.cutPreview = result ? { source: selected[0], pieces: result.pieces, method: result.method } : null;
-        this.visuals.objectPreviews = result?.pieces ?? [];
-        this.hooks.previewObjects?.(result?.pieces ?? null, result ? [selected[0].id] : []);
-        if (!result) this.hooks.toast('This object does not support a correct subdivision. The original is unchanged.');
-      }
-    }
-    if (update.finalize) {
-      if (update.count >= 2 && this.cutPreview) {
-        this.hooks.send({ type: 'subdivide-object', source: this.cutPreview.source, pieces: this.cutPreview.pieces, method: this.cutPreview.method, pieceCount: update.count });
-        this.hooks.toast(`Created ${update.count} independently editable pieces.`);
-      } else this.hooks.toast(update.count === 1 ? 'One chop requests one piece, so the object was not divided.' : 'Subdivision cancelled; the original is unchanged.');
-      this.cancelSpatial(); this.hooks.send({ type: 'settings', patch: { objectGestureMode: 'move' } }); return;
-    }
-    const mapped = this.hooks.map(pose.center, size, this.hooks.getState().settings);
-    this.hooks.showPointer(mapped, 22, this.chop.state === 'SWIPING', 'C');
+  private mapGuide(size: Size, anchor: Point, direction: Point): CutLine {
+    const settings = this.hooks.getState().settings, point = this.hooks.map(anchor, size, settings);
+    const sample = this.hooks.map({ x: anchor.x + direction.x * .05, y: anchor.y + direction.y * .05 }, size, settings);
+    const vector = { x: sample.x - point.x, y: sample.y - point.y }, length = Math.max(1e-6, Math.hypot(vector.x, vector.y));
+    return { point, direction: { x: vector.x / length, y: vector.y / length } };
+  }
+  private updateScissorCut(points: Point[], size: Size, now: number, selected: BoardObject): void {
+    this.diagnostics.interaction = 'scissor-cut';
+    const pose = classifyScissors(points, size), line = this.mapGuide(size, pose.guideAnchor, pose.guideDirection);
+    const update = this.scissors.update(pose, line.point, line.direction, now);
+    Object.assign(this.diagnostics, { scissorState: this.scissors.state, scissorConfidence: pose.confidence, scissorSeparation: pose.separation });
+    if (update.guide) this.setCutGuide(selected, update.guide);
+    this.visuals.spatialLabel = this.scissors.state === 'GUIDE_ACTIVE' ? (this.visuals.cutValid ? 'SCISSORS OPEN · VALID CUT' : 'SCISSORS OPEN · INVALID CUT')
+      : this.scissors.state === 'SNIP_DETECTED' ? 'SNIP ACCEPTED' : 'OPEN SCISSORS';
+    if (update.snip) this.commitCut(selected, update.guide!);
+    this.hooks.showPointer(line.point, 22, this.scissors.state === 'GUIDE_ACTIVE', '✂');
+  }
+  private setCutGuide(source: BoardObject, line: CutLine): void {
+    const scene = currentObjects(this.hooks.getState().history);
+    const attached = scene.some(object => object.type === 'connector' && (object.fromId === source.id || object.toId === source.id));
+    let serial = 0; const result = attached ? null : cutObject(source, line, () => `cut-preview-${++serial}`);
+    this.cutPreview = result ? { source, pieces: result.pieces, line: result.line } : null;
+    this.visuals.cutGuide = line; this.visuals.cutValid = !!result; this.visuals.objectPreviews = result?.pieces ?? [];
+    this.hooks.previewObjects?.(result?.pieces ?? null, result ? [source.id] : []);
+    Object.assign(this.diagnostics, { cutGuide: line, cutValid: !!result, cutRejection: result ? null : attached ? 'Attached connectors must be removed first' : 'Guide misses, touches a boundary, or creates an unsupported region' });
+  }
+  private commitCut(source: BoardObject, line: CutLine): void {
+    const result = cutObject(source, line);
+    if (!result) { this.scissors.rejected(); this.hooks.toast('Invalid cut. Reopen the scissors and position the guide through the object.'); return; }
+    this.hooks.send({ type: 'cut-object', source, pieces: result.pieces, line: result.line });
+    this.scissors.committed(); this.visuals.spatialLabel = 'SNIP ACCEPTED'; this.hooks.toast('Cut created two independent objects.');
+    this.clearCutPreview(); this.hooks.send({ type: 'settings', patch: { objectGestureMode: 'move' } });
+  }
+  private cancelSpatialTracking(): void { this.fistManipulation.trackingLost(); this.scissors.trackingLost(); this.clearCutPreview(); this.hooks.previewObjects?.(null); }
+  private clearCutPreview(): void {
+    this.cutPreview = null; this.visuals.cutGuide = null; this.visuals.cutValid = false; this.visuals.objectPreviews = [];
+    Object.assign(this.diagnostics, { cutGuide: null, cutValid: false });
+  }
+  setManualCutGuide(point: Point, direction: Point): boolean {
+    const state = this.hooks.getState(), selected = currentObjects(state.history).filter(object => state.selection.includes(object.id));
+    if (state.settings.objectGestureMode !== 'cut' || selected.length !== 1 || state.selection.length !== 1) return false;
+    const length = Math.hypot(direction.x, direction.y); if (length < 1e-6) return false;
+    this.setCutGuide(selected[0], { point: { ...point }, direction: { x: direction.x / length, y: direction.y / length } });
+    this.visuals.spatialLabel = this.visuals.cutValid ? 'VALID CUT · APPLY' : 'INVALID CUT'; return true;
+  }
+  applyManualCut(): void {
+    if (!this.cutPreview) { this.hooks.toast('Position a valid cutting guide through the selected object first.'); return; }
+    this.commitCut(this.cutPreview.source, this.cutPreview.line);
+  }
+  calibrateFistDepth(kind: 'near' | 'far'): void {
+    if (!this.lastFistSize) { this.hooks.toast('Show the dominant-hand fist to the camera, then capture this point.'); return; }
+    this.hooks.send({ type: 'settings', patch: kind === 'near' ? { fistDepthNear: this.lastFistSize } : { fistDepthFar: this.lastFistSize } });
+    this.hooks.toast(`Captured relative ${kind} fist size.`);
   }
   private cancelSpatial(): void {
-    this.spatial.cancel(); this.chop.reset(); this.cutPreview = null; this.visuals.objectPreviews = []; this.visuals.spatialLabel = null; this.visuals.chopCount = 0;
-    this.hooks.previewObjects?.(null); Object.assign(this.diagnostics, { spatialState: 'IDLE', chopState: 'ARMED', chopCount: 0, spatialScale: 1, spatialAngle: 0 });
+    this.fistManipulation.cancel(); this.scissors.reset(); this.clearCutPreview(); this.visuals.spatialLabel = null;
+    this.hooks.previewObjects?.(null); Object.assign(this.diagnostics, { spatialState: 'IDLE', scissorState: 'IDLE', spatialScale: 1, spatialAngle: 0, fistBaselineSize: 0, fistRejection: null });
   }
   private capturePlanePoint(point: Point, phase: PinchPhase): void {
     if (!this.planeCapture || phase !== 'pinchStart') return;

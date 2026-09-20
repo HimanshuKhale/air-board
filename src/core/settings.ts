@@ -12,6 +12,7 @@ export const defaults = (): Settings => ({
   confirmationHoldMs: 400, shapeEditMode: 'scale', shapeResizeMode: 'proportional',
   objectGestureMode: 'move',
   spatialTransformHoldMs: 220, spatialScaleGain: 1.5, spatialSmoothing: .35, spatialScaleDeadZone: .03, spatialRotationDeadZoneDeg: 3,
+  fistDepthNear: .24, fistDepthFar: .14,
   reactionsEnabled: true,
   reactionSlots: [
     { gesture: 'thumbs-up', emoji: '👍', enabled: true },

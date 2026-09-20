@@ -36,13 +36,15 @@ export function dialogs(): string {
     <h3>Smart shapes</h3>
     <label class="check-field"><input type="checkbox" data-setting="smartShapes"> Automatically clean confident strokes</label>
     <label class="field">Smart recognition<select data-setting="recognitionMode"><option value="shapes">Shapes</option><option value="digits">Digits 0–9</option><option value="mixed">Mixed (conservative)</option></select></label>
-    <section class="reaction-settings"><h3>Spatial transform gesture</h3>
-      <p class="muted">Select objects, choose Scale or Rotate in the contextual bar, then hold the dominant-hand three-finger pose.</p>
-      <label class="field">Pose hold (ms)<input type="range" min="150" max="500" step="10" data-setting="spatialTransformHoldMs"></label>
-      <label class="field">Scale gain<input type="range" min="0.5" max="3" step="0.1" data-setting="spatialScaleGain"></label>
-      <label class="field">Transform smoothing<input type="range" min="0.1" max="0.8" step="0.05" data-setting="spatialSmoothing"></label>
+    <section class="reaction-settings"><h3>Fist manipulation</h3>
+      <p class="muted">Select native objects, close the dominant-hand fist near them, hold briefly, then move. Apparent hand size provides relative near/far scaling; opening the fist commits once.</p>
+      <label class="field">Acquisition hold (ms)<input type="range" min="150" max="500" step="10" data-setting="spatialTransformHoldMs"></label>
+      <label class="field">Relative depth sensitivity<input type="range" min="0.5" max="3" step="0.1" data-setting="spatialScaleGain"></label>
+      <label class="field">Manipulation smoothing<input type="range" min="0.1" max="0.8" step="0.05" data-setting="spatialSmoothing"></label>
       <label class="field">Scale dead zone<input type="range" min="0.01" max="0.12" step="0.01" data-setting="spatialScaleDeadZone"></label>
       <label class="field">Rotation dead zone (degrees)<input type="range" min="1" max="12" step="1" data-setting="spatialRotationDeadZoneDeg"></label>
+      <div class="dialog-actions compact"><button type="button" data-action="capture-fist-far">Capture fist far</button><button type="button" data-action="capture-fist-near">Capture fist near</button></div>
+      <p class="muted">Calibration uses aspect-correct apparent palm size, not physical distance.</p>
     </section>
     <section class="reaction-settings"><h3>Left-hand reactions</h3>
       <label class="check-field"><input type="checkbox" data-setting="reactionsEnabled"> Enable reactions</label>
@@ -69,11 +71,10 @@ export function dialogs(): string {
     <label class="field">Camera<select id="present-camera-select" aria-label="Presentation camera"><option value="">Default camera</option></select></label>
     <div class="dialog-actions">${button('start-camera', 'Start selected camera', 'camera')}${button('close-background', 'Done', 'chevron', 'class="primary"')}</div>
   </dialog><dialog id="shapes-dialog"><div class="dialog-heading"><h2>Create a shape</h2><button type="button" data-action="close-shapes" aria-label="Close shapes">×</button></div><p class="dialog-intro">Choose a native shape. Select it to scale it or edit its points.</p><div class="shape-grid">${['triangle','square','rectangle','parallelogram','trapezoid','pentagon','hexagon','polygon','circle','ellipse','line','arrow'].map(shape => `<button type="button" data-create-shape="${shape}">${shape}</button>`).join('')}</div></dialog>
-  <div id="shape-edit-bar" class="shape-edit-bar" hidden><b>Object</b>
-    <button type="button" data-action="object-move">Move</button><button type="button" data-action="object-scale">Scale</button><button type="button" data-action="object-rotate">Rotate</button><button type="button" data-action="object-cut">Cut</button>
-    <span data-spatial-controls="scale"><button type="button" data-action="object-scale-down">80%</button><button type="button" data-action="object-scale-up">125%</button></span>
-    <span data-spatial-controls="rotate"><button type="button" data-action="object-rotate-left">−15°</button><button type="button" data-action="object-rotate-right">+15°</button></span>
-    <span data-spatial-controls="cut"><button type="button" data-action="object-divide-two">2 pieces</button><button type="button" data-action="object-divide-three">3 pieces</button><button type="button" data-action="object-divide-similar">4 similar triangles</button><button type="button" data-action="object-cancel">Cancel</button></span>
+  <div id="shape-edit-bar" class="shape-edit-bar" hidden><b><span id="selection-count">0</span> selected</b>
+    <button type="button" data-action="object-move">Move Only</button><button type="button" data-action="object-move-scale">Move + Scale</button><button type="button" data-action="object-move-rotate">Move + Rotate</button><button type="button" data-action="object-full">Full Manipulation</button><button type="button" data-action="object-cut">Cut</button>
+    <span data-spatial-controls="cut"><span class="muted">Drag on the board to place and rotate the guide.</span><button type="button" data-action="object-apply-cut">Apply Cut</button><button type="button" data-action="object-cancel">Cancel</button></span>
+    <span id="spatial-live-status" class="muted">WAITING FOR FIST | 100% | 0 deg</span>
     <span data-single-shape-controls><button type="button" data-action="shape-scale">Handles</button><button type="button" data-action="shape-points">Points</button><button type="button" data-action="resize-proportional">Proportional</button><button type="button" data-action="resize-free">Free</button></span>
   </div>
   <section id="voice-panel" class="voice-panel" hidden aria-label="AirBoard voice controls"><div class="voice-heading"><b>AirBoard Intelligence</b><button type="button" id="voice-close" aria-label="Close voice panel">×</button></div><p>Audio is sent to the local speech service only while listening. With the OpenAI provider, that service sends each audio segment to OpenAI. Camera and board images are never sent.</p><label class="field">Mode<select id="ai-mode"><option value="off">Off</option><option value="commands">Commands</option><option value="automatic" disabled>Automatic (coming later)</option></select></label><label class="check-field"><input id="command-mode" type="checkbox"> Command Mode (no wake phrase needed)</label><div class="voice-actions"><button type="button" id="mic-toggle">Start microphone</button><button type="button" id="undo-ai">Undo Last AI Action</button></div><label class="field">Type a command<input id="typed-command" type="text" maxlength="500" placeholder="AirBoard, create a flowchart with input, process and output"></label><button type="button" id="send-command">Run command</button><p id="ai-status" role="status">Microphone off</p><p id="ai-transcript" aria-live="polite"></p><ol id="ai-log" aria-label="AI action log"></ol></section><div id="shape-suggestion" class="shape-suggestion" hidden><span id="shape-suggestion-label"></span><span id="shape-countdown">8.0s</span><span id="shape-gesture-feedback">Left-hand V confirms · shaka cancels</span><button type="button" id="shape-convert">✌️ YES</button><button type="button" id="shape-keep">🤙 NO</button></div><div id="toast" class="toast" role="status"></div><div id="hand-cursor" class="hand-cursor" hidden><span></span></div>`;

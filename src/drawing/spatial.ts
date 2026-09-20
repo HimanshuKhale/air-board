@@ -60,6 +60,22 @@ export function transformSelection(objects: BoardObject[], scale: number, rotati
   return results;
 }
 
+/** Applies scale, then image-plane rotation around the immutable group pivot, then board translation. */
+export function manipulateSelection(objects: BoardObject[], translation: Point, scale: number, rotation: number, pivot = selectionCenter(objects)): BoardObject[] | null {
+  if (!Number.isFinite(translation.x) || !Number.isFinite(translation.y)) return null;
+  const transformed = transformSelection(objects, scale, rotation, pivot);
+  if (!transformed) return null;
+  const moved = transformed.map(object => translatedObject(object, translation.x, translation.y));
+  const outside = moved.some(object => {
+    const center = objectCenter(object), radians = object.rotation ?? 0;
+    return [
+      { x: object.x, y: object.y }, { x: object.x + object.width, y: object.y },
+      { x: object.x + object.width, y: object.y + object.height }, { x: object.x, y: object.y + object.height },
+    ].map(point => rotatePoint(point, center, radians)).some(point => point.x < 0 || point.x > BOARD.width || point.y < 0 || point.y > BOARD.height);
+  });
+  return outside ? null : moved;
+}
+
 export function translatedObject(object: BoardObject, dx: number, dy: number): BoardObject {
   return { ...object, x: object.x + dx, y: object.y + dy, vertices: object.vertices?.map(point => ({ x: point.x + dx, y: point.y + dy })) };
 }

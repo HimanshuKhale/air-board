@@ -25,6 +25,12 @@ export function drawInteractionOverlay(ctx: CanvasRenderingContext2D, visuals: I
     ctx.setLineDash([]); ctx.font = 'bold 24px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillStyle = 'rgba(34,61,48,.92)'; ctx.fillRect(700, 28, 200, 48); ctx.fillStyle = '#fff'; ctx.fillText(visuals.spatialLabel, 800, 52);
   }
+  if (visuals.cutGuide) {
+    const { point, direction } = visuals.cutGuide, extent = Math.hypot(1600, 900);
+    ctx.setLineDash([16, 10]); ctx.lineWidth = 5; ctx.strokeStyle = visuals.cutValid ? '#1f9d68' : '#d04444';
+    ctx.beginPath(); ctx.moveTo(point.x - direction.x * extent, point.y - direction.y * extent); ctx.lineTo(point.x + direction.x * extent, point.y + direction.y * extent); ctx.stroke();
+    ctx.setLineDash([]); ctx.fillStyle = visuals.cutValid ? '#1f9d68' : '#d04444'; ctx.beginPath(); ctx.arc(point.x, point.y, 9, 0, Math.PI * 2); ctx.fill();
+  }
   if (selectedObjects.length === 1 && !selected.length && settings && !['text', 'connector'].includes(selectedObjects[0].type)) {
     const object = visuals.objectPreview?.id === selectedObjects[0].id ? visuals.objectPreview : selectedObjects[0];
     ctx.setLineDash([]); ctx.lineWidth = 2;

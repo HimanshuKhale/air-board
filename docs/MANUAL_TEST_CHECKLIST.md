@@ -88,20 +88,29 @@ Record laptop/CPU, Windows version, Chrome/Edge version, webcam, lighting, date,
 - [ ] Trigger several reactions and export both PNG variants while one is visible. Confirm reactions, hand overlays and reaction previews are absent from the files. Close either window during an effect and confirm the remaining window cleans up normally.
 - [ ] Enable the operating system reduced-motion preference. Confirm reactions remain briefly visible and fade without floating or scaling.
 
-## Spatial transform and subdivision gateway
+## Fist manipulation and precision scissor cutting
 
-- [ ] Connect the normal drawing pad/stylus. Draw before, during and after hand tracking is enabled; tablet pointer input remains available and is never converted into a three-finger or chop gesture.
-- [ ] Select one native shape and choose Scale. With the physical dominant hand, constrain thumb/index and hold middle/ring/pinky in a mid-range pose for the configured interval. Open those three fingers to grow and curl them to shrink. Confirm the live percentage is stable, release commits one undo step, and tracking loss cancels the preview.
-- [ ] Select two or more native objects and repeat Scale. Confirm their shared center remains fixed, relative layout is preserved, one Undo restores every original geometry, and one Redo reproduces the exact result.
-- [ ] Choose Rotate and reacquire the three-finger pose. Rotate the hand in the camera image plane across the ±180° boundary; confirm the angle does not jump. Verify lines, arrows, rectangles, triangles, polygons and ellipses render, select, lasso, resize and export at their rotated geometry.
-- [ ] Confirm transform mode never activates with no selected native object. While a transform is active, try fist, open palm, lasso, Pen Writing and a left-hand reaction; only the selected transform owns the manipulating hand. Pause, change mode, stop camera or hide the hand and confirm the baseline returns unless release explicitly committed.
-- [ ] Select a line, choose Cut, and make three deliberate hand-edge swipes with a return/release between them. Confirm feedback reads Cut count 1, 2 and 3, a three-piece preview appears, and inactivity commits exactly three equal-length independently selectable segments.
-- [ ] Make one chop and wait. Confirm the original remains unchanged. Try slow repositioning, tremor and held/repeated frames; none count as extra chops. Use Cancel during a preview and verify the original remains.
-- [ ] Subdivide a triangle into three pieces. Measure or inspect vertices and confirm equal area through one edge split to the opposite vertex; do not describe the three pieces as similar. Test the separate four-piece Similar construction.
-- [ ] Divide a rectangle and a convex polygon into 2–12 equal-area regions. Undo restores the exact source; redo restores the same piece IDs and geometry in Studio and Presentation.
-- [ ] Rotate a line before subdivision and confirm all segments remain collinear and cover the original. For an arrow, confirm only the terminal piece retains the arrowhead.
-- [ ] Confirm circles, ellipses, text, freehand strokes, concave/invalid polygons and connectors stay unchanged with a clear unsupported message. Confirm a shape referenced by a connector cannot be subdivided; transforming the shape keeps the connector attached to updated geometry.
-- [ ] Use contextual 80%/125%, ±15°, and 2/3-piece controls with mouse, touch and tablet stylus. Confirm these commands use the same atomic history and synchronization path as gestures.
+- [ ] Connect the normal drawing pad/stylus. Draw before, during and after hand tracking is enabled. An active tablet stroke blocks new fist/scissor acquisition, and tablet writing resumes unchanged afterward.
+- [ ] With Right configured as dominant, select a rectangle and choose Move Only. Hold a physical-right fist near the rectangle for the configured interval. Confirm WAITING FOR FIST changes to GRABBED and the rectangle does not jump.
+- [ ] Move the acquired fist left/right/up/down. Confirm calibrated board movement follows from the original anchor. Open deliberately; confirm one Undo restores the exact source and one Redo restores the exact final position.
+- [ ] Select a two-object group and repeat. Confirm the shared pivot and relative member layout remain stable.
+- [ ] Capture a comfortable far fist and near fist in Settings. Choose Move + Scale. Move the fist toward the webcam and confirm the percentage rises and the object grows; move it away and confirm both fall. Record camera, starting distance, useful range, jitter and any frozen ambiguous measurements.
+- [ ] Rotate the fist without changing distance. Confirm apparent-size changes do not cause sudden scaling. Repeat across varied pitch/yaw and partial knuckle occlusion; scaling should hold its last reliable value instead of jumping.
+- [ ] Choose Move + Rotate. Rotate clockwise/counterclockwise in the camera image plane and cross +/-180 degrees. Confirm the angle remains continuous. This does not verify arbitrary 3D wrist roll.
+- [ ] Choose Full Manipulation and combine X/Y movement, near/far movement and image-plane rotation. Confirm each preview remains anchored to the acquisition baseline and release creates one history action.
+- [ ] Test Move Only as the fallback if relative depth is noisy. Confirm native resize handles still provide proportional/free resize and vertex editing.
+- [ ] Hide the fist temporarily, stop the camera, pause hand control, change mode and switch tabs during separate acquisitions. Each unfinished preview must cancel with no history entry; returning with a held fist must not look like a deliberate release.
+- [ ] With Mirror on, repeat left/right manipulation and scissor positioning. Disable Mirror and repeat. Anatomical dominant-hand assignment must remain correct.
+- [ ] Repeat fist acquisition and combined manipulation in bright classroom light, dim light, side light and a cluttered background. Record false grabs, missed releases and measured tracking/render rates.
+- [ ] Verify rotated and scaled lines, arrows, rectangles, triangles, polygons and ellipses remain rendered, selectable, hit-testable, editable and present in both PNG export modes.
+- [ ] Select one line, arm Cut, and open physical-right scissors: index/middle extended and separated, ring/pinky folded. Confirm SCISSORS OPEN appears only after stabilization and a green/red guide follows the fingertip midpoint and hand rotation.
+- [ ] Hold a stationary V for several seconds. Confirm it never cuts. Close the whole hand into a fist and confirm it never cuts. Show the same pose with the physical-left hand and confirm no cut.
+- [ ] Position a valid guide across the line away from its endpoints, then bring index/middle together while keeping them extended. Confirm SNIP ACCEPTED appears once, exactly two collinear objects replace the source, and selection becomes empty.
+- [ ] Reopen and repeat on a triangle, rotated rectangle and convex polygon at off-center angles. Confirm the visible line matches the actual boundary and the two independently selectable regions reconstruct the source.
+- [ ] Try a miss, tangent, existing boundary, negligible sliver, circle/ellipse, text, freehand, concave polygon and a shape with an attached connector. Confirm a clear invalid/unsupported result, no history action and unchanged source.
+- [ ] In Cut mode, use mouse, touch and drawing-pad stylus: press at the intended location, drag to set guide direction, then Apply Cut. Confirm the same atomic `cut-object` path and Studio/Presentation synchronization.
+- [ ] Undo a cut and confirm the exact source returns. Redo and confirm the same two piece IDs/geometries return. Retry or switch the leader window and confirm no duplicate pieces.
+- [ ] Export transformed and cut geometry to normal and transparent PNG. Open the 1600x900 files and compare the rendered position, rotation, scale and cut boundary with the board.
 
 ## Intelligence V1: real microphone and webcam acceptance
 

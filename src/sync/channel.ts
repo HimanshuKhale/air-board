@@ -112,6 +112,8 @@ export class BoardChannel {
       this.state.settings.spatialSmoothing ??= .35;
       this.state.settings.spatialScaleDeadZone ??= .03;
       this.state.settings.spatialRotationDeadZoneDeg ??= 3;
+      this.state.settings.fistDepthNear ??= .24;
+      this.state.settings.fistDepthFar ??= .14;
       this.applied = new Set(m.applied as string[]);
       for (const id of this.applied) this.unacknowledged.delete(id);
       this.ready = true; this.onChange(); this.flush();

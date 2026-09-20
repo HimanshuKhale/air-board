@@ -21,6 +21,8 @@ export interface ReactionEvent {
   id: string; type: ReactionGesture; emoji: ReactionEmoji; position: Point;
   createdAt: number; duration: number; intensity: 'subtle' | 'normal';
 }
+export interface CutLine { point: Point; direction: Point }
+export type TransformMode = 'move' | 'scale' | 'rotate' | 'scale-rotate' | 'move-scale' | 'move-rotate' | 'move-scale-rotate';
 export type DrawAction =
   | { kind: 'stroke'; stroke: Stroke }
   | { kind: 'clear' }
@@ -31,8 +33,9 @@ export type DrawAction =
   | { kind: 'replace'; strokeId: string; object: BoardObject }
   | { kind: 'replace-many'; strokeIds: string[]; object: BoardObject }
   | { kind: 'diagram'; objects: BoardObject[] }
-  | { kind: 'transform'; before: BoardObject[]; after: BoardObject[]; mode: 'scale' | 'rotate' | 'scale-rotate' }
-  | { kind: 'subdivide'; source: BoardObject; pieces: BoardObject[]; method: 'equal-length' | 'equal-area' | 'similar'; pieceCount: number };
+  | { kind: 'transform'; before: BoardObject[]; after: BoardObject[]; mode: TransformMode }
+  | { kind: 'subdivide'; source: BoardObject; pieces: BoardObject[]; method: 'equal-length' | 'equal-area' | 'similar'; pieceCount: number }
+  | { kind: 'cut'; source: BoardObject; pieces: [BoardObject, BoardObject]; line: CutLine };
 export interface BackgroundSettings {
   mode: 'blank' | 'camera' | 'image'; color: string; image: string | null;
   fit: Fit; mirror: boolean; dim: number; positionX: number; positionY: number;
@@ -52,9 +55,10 @@ export interface Settings {
   lassoGesture: 'four-fingertip' | 'index-only'; lassoHoldMs: number;
   confirmationHoldMs: number;
   shapeEditMode: 'scale' | 'points'; shapeResizeMode: 'proportional' | 'free';
-  objectGestureMode: 'move' | 'scale' | 'rotate' | 'cut';
+  objectGestureMode: 'move' | 'move-scale' | 'move-rotate' | 'full' | 'cut';
   spatialTransformHoldMs: number; spatialScaleGain: number; spatialSmoothing: number;
   spatialScaleDeadZone: number; spatialRotationDeadZoneDeg: number;
+  fistDepthNear: number; fistDepthFar: number;
   reactionsEnabled: boolean; reactionSlots: ReactionSlot[];
   reactionIntensity: 'subtle' | 'normal'; reactionDurationMs: number;
 }

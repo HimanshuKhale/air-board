@@ -1,4 +1,4 @@
-import { BOARD, type BoardObject, type Brush, type DrawAction, type HistoryState, type Point, type Stroke } from '../core/types';
+import { BOARD, type BoardObject, type Brush, type CutLine, type DrawAction, type HistoryState, type Point, type Stroke, type TransformMode } from '../core/types';
 import { attachedConnector } from './objects';
 import { objectBounds } from './objects';
 import { translatedObject } from './spatial';
@@ -74,11 +74,17 @@ export function createDiagram(history: HistoryState, objects: BoardObject[]): bo
   if (objects.some(item => item.fromId && (!ids.has(item.fromId) || !ids.has(item.toId!)))) return false;
   commit(history, { kind: 'diagram', objects }); return true;
 }
-export function transformObjects(history: HistoryState, before: BoardObject[], after: BoardObject[], mode: 'scale' | 'rotate' | 'scale-rotate'): boolean {
+export function transformObjects(history: HistoryState, before: BoardObject[], after: BoardObject[], mode: TransformMode): boolean {
   const scene = currentScene(history), current = new Map(scene.objects.map(object => [object.id, object]));
   if (!before.length || before.length !== after.length || before.some(object => object.type === 'connector') || new Set(before.map(object => object.id)).size !== before.length ||
     before.some(object => !current.has(object.id) || JSON.stringify(current.get(object.id)) !== JSON.stringify(object)) || after.some((object, index) => object.id !== before[index].id)) return false;
   commit(history, { kind: 'transform', before: before.map(cloneObject), after: after.map(cloneObject), mode }); return true;
+}
+export function cutObjectHistory(history: HistoryState, source: BoardObject, pieces: [BoardObject, BoardObject], line: CutLine): boolean {
+  const scene = currentScene(history), current = scene.objects.find(object => object.id === source.id), ids = new Set(scene.objects.map(object => object.id));
+  if (!current || JSON.stringify(current) !== JSON.stringify(source) || pieces.length !== 2 || pieces.some(piece => ids.has(piece.id) || piece.id === source.id) || pieces[0].id === pieces[1].id ||
+    scene.objects.some(object => object.type === 'connector' && (object.fromId === source.id || object.toId === source.id))) return false;
+  commit(history, { kind: 'cut', source: cloneObject(source), pieces: pieces.map(cloneObject) as [BoardObject, BoardObject], line: { point: { ...line.point }, direction: { ...line.direction } } }); return true;
 }
 export function subdivideObject(history: HistoryState, source: BoardObject, pieces: BoardObject[], method: 'equal-length' | 'equal-area' | 'similar', pieceCount: number): boolean {
   const scene = currentScene(history), current = scene.objects.find(object => object.id === source.id);
@@ -112,6 +118,7 @@ export function currentScene(history: HistoryState, preview: MovePreview | null 
         objects = objects.map(object => replacements.has(object.id) ? cloneObject(replacements.get(object.id)!) : object); break;
       }
       case 'subdivide': objects = objects.filter(object => object.id !== action.source.id).concat(action.pieces.map(cloneObject)); break;
+      case 'cut': objects = objects.filter(object => object.id !== action.source.id).concat(action.pieces.map(cloneObject)); break;
     }
   }
   if (history.active) strokes.push(translatedStroke(history.active, 0, 0));

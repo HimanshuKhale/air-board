@@ -4,7 +4,7 @@ import { presentation } from './ui/presentation';
 import { dialogs } from './ui/dialogs';
 import { bindControls, updateControls } from './ui/controls';
 import { BOARD, type ReactionEvent, type Stroke } from './core/types';
-import { cameraToCanvas, canvasToClient } from './core/coordinates';
+import { cameraToCanvas, canvasToClient, clientToCanvas } from './core/coordinates';
 import { BoardChannel } from './sync/channel';
 import { DrawingEngine } from './drawing/engine';
 import { BackgroundRenderer } from './background/renderer';
@@ -290,6 +290,8 @@ bindControls(bus, {
     if (!result) { toast('This object does not support a mathematically valid subdivision.'); return; }
     bus.send({ type: 'subdivide-object', source: selected[0], pieces: result.pieces, method: result.method, pieceCount: count });
   },
+  applyCut: () => interactions.applyManualCut(),
+  calibrateFistDepth: kind => interactions.calibrateFistDepth(kind),
   cancelSpatial: () => interactions.cancelSpatialMode(),
   createShape: type => {
     const count = currentObjects(bus.state.history).length;
@@ -300,6 +302,27 @@ bindControls(bus, {
     bus.send({ type: 'create-object', object }); bus.send({ type: 'select', ids: [object.id] });
   },
 });
+let manualCutDrag: { pointerId: number; point: { x: number; y: number }; direction: { x: number; y: number } } | null = null;
+const cutPoint = (event: PointerEvent) => clientToCanvas({ x: event.clientX, y: event.clientY }, drawing.canvas.getBoundingClientRect(), BOARD);
+drawing.canvas.addEventListener('pointerdown', event => {
+  if (bus.state.settings.objectGestureMode !== 'cut' || event.button !== 0) return;
+  const point = cutPoint(event), direction = { x: 0, y: 1 };
+  if (!interactions.setManualCutGuide(point, direction)) return;
+  event.preventDefault(); event.stopImmediatePropagation(); input.cancelDrawing(); drawing.canvas.setPointerCapture(event.pointerId);
+  manualCutDrag = { pointerId: event.pointerId, point, direction };
+}, true);
+drawing.canvas.addEventListener('pointermove', event => {
+  if (!manualCutDrag || manualCutDrag.pointerId !== event.pointerId) return;
+  event.preventDefault(); event.stopImmediatePropagation(); const current = cutPoint(event);
+  const direction = { x: current.x - manualCutDrag.point.x, y: current.y - manualCutDrag.point.y };
+  if (Math.hypot(direction.x, direction.y) >= 8) { manualCutDrag.direction = direction; interactions.setManualCutGuide(manualCutDrag.point, direction); }
+}, true);
+const endManualCutDrag = (event: PointerEvent) => {
+  if (!manualCutDrag || manualCutDrag.pointerId !== event.pointerId) return;
+  event.preventDefault(); event.stopImmediatePropagation(); manualCutDrag = null;
+};
+drawing.canvas.addEventListener('pointerup', endManualCutDrag, true);
+drawing.canvas.addEventListener('pointercancel', endManualCutDrag, true);
 bus.onChange = (command, requestId) => {
   drawing.invalidate(!command || !['begin', 'point'].includes(command.type));
   if (requestId && aiRequestIds.delete(requestId) && command && !['select', 'undo', 'redo'].includes(command.type)) lastAiActionPosition = bus.state.history.position;
@@ -412,7 +435,9 @@ function render(now: number): void {
       `Gesture: ${interaction.instantaneousGesture}; stable: ${interaction.stableGesture}; enter: ${Math.round(interaction.gestureEnterMs)} ms`,
       `Confirmation: ${interaction.confirmationGesture} (${interaction.confirmationConfidence.toFixed(2)}); four-fingertip pinch: ${interaction.fourFingertipConfidence.toFixed(2)}`,
       `Reaction: ${interaction.reactionGesture} (${interaction.reactionConfidence.toFixed(2)}); state: ${interaction.reactionState}`,
-      `Spatial: ${s.objectGestureMode}; state: ${interaction.spatialState}; scale ${interaction.spatialScale.toFixed(2)}; angle ${(interaction.spatialAngle * 180 / Math.PI).toFixed(1)}°; chops ${interaction.chopCount}`,
+      `Fist: ${s.objectGestureMode}; confidence ${interaction.fistConfidence.toFixed(2)}; state ${interaction.spatialState}; apparent size ${interaction.fistBaselineSize.toFixed(3)} -> ${interaction.fistCurrentSize.toFixed(3)}; scale ${interaction.spatialScale.toFixed(2)}; angle ${(interaction.spatialAngle * 180 / Math.PI).toFixed(1)}°`,
+      `Fist rejection: ${interaction.fistRejection ?? 'none'}`,
+      `Scissors: confidence ${interaction.scissorConfidence.toFixed(2)}; separation ${interaction.scissorSeparation.toFixed(2)}; state ${interaction.scissorState}; guide ${interaction.cutGuide ? interaction.cutGuide.point.x.toFixed(1) + ', ' + interaction.cutGuide.point.y.toFixed(1) : 'none'}; ${interaction.cutValid ? 'valid' : interaction.cutRejection ?? 'inactive'}`,
       `Active interaction: ${interaction.interaction}; hand control: ${interaction.handControl}`,
       `Two-hand close: ${interaction.twoHandClose}; hold: ${Math.round(interaction.twoHandHeldMs)} ms`,
       `Lasso active: ${interaction.lassoActive}; selected strokes: ${interaction.selectedStrokeCount}; grabbed: ${interaction.grabbedStrokeId ?? 'none'}`,
@@ -421,6 +446,10 @@ function render(now: number): void {
       `Raw pointer: ${interaction.rawPoint ? interaction.rawPoint.x.toFixed(3) + ', ' + interaction.rawPoint.y.toFixed(3) : 'none'}`,
       `Mapped pointer: ${interaction.mappedPoint ? interaction.mappedPoint.x.toFixed(1) + ', ' + interaction.mappedPoint.y.toFixed(1) : 'none'}`,
     ].join('\n');
+    const spatialStatus = el('spatial-live-status');
+    if (spatialStatus) spatialStatus.textContent = s.objectGestureMode === 'cut'
+      ? `${interaction.scissorState.replaceAll('_', ' ')} · ${interaction.cutValid ? 'VALID CUT' : interaction.cutRejection ?? 'POSITION GUIDE'}`
+      : `${interaction.spatialState.replaceAll('_', ' ')} · SCALE ${Math.round(interaction.spatialScale * 100)}% · ROTATE ${interaction.spatialAngle >= 0 ? '+' : ''}${Math.round(interaction.spatialAngle * 180 / Math.PI)}°`;
     pipelineDebug.render(s);
     if (calibrating) el('calibration-readout').textContent = hand ? `Hand detected · ${hand.phase} · pinch ratio ${hand.ratio.toFixed(2)}\nRaw index ${hand.raw.x.toFixed(3)}, ${hand.raw.y.toFixed(3)} · Smoothed ${hand.smooth.x.toFixed(3)}, ${hand.smooth.y.toFixed(3)}\n${metrics}\nModel detection/presence/tracking thresholds: ${camera.tracker.diagnostics.worker.threshold}. Per-frame detection confidence is not exposed.` : (camera.remote ? 'Calibration must run in the camera-owning ' + camera.remote.view + ' window.' : 'No hand detected. Open your hand in front of the camera. Pinching starts only after an open hand is seen.');
     if (camera.active) el('tracking-status').textContent = s.paused ? 'Hand input paused · mouse still available' : hand ? 'Hand detected · ' + hand.phase.replace('pinch', 'pinch ') : 'Tracking ready · raise one open hand';

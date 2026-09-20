@@ -1,7 +1,7 @@
 import type { Point, Settings } from '../core/types';
 import { homographyFromQuad } from './homography';
 export const HAND_SETTINGS_KEY = 'saai-airboard-hand-settings-v2';
-type Stored = Pick<Settings, 'dominantHand' | 'gestureSensitivity' | 'inputMode' | 'stylusOffset' | 'penGripHoldMs' | 'openPalmHoldMs' | 'palmEraserSize' | 'planePoints' | 'lassoCloseRadius' | 'lassoGesture' | 'lassoHoldMs' | 'fistGrabRadius' | 'twoHandHoldMs' | 'twoHandProximity' | 'smartShapes' | 'autoConvertShapes' | 'recognitionMode' | 'confirmationHoldMs' | 'shapeEditMode' | 'shapeResizeMode' | 'reactionsEnabled' | 'reactionSlots' | 'reactionIntensity' | 'reactionDurationMs' | 'spatialTransformHoldMs' | 'spatialScaleGain' | 'spatialSmoothing' | 'spatialScaleDeadZone' | 'spatialRotationDeadZoneDeg'>;
+type Stored = Pick<Settings, 'dominantHand' | 'gestureSensitivity' | 'inputMode' | 'stylusOffset' | 'penGripHoldMs' | 'openPalmHoldMs' | 'palmEraserSize' | 'planePoints' | 'lassoCloseRadius' | 'lassoGesture' | 'lassoHoldMs' | 'fistGrabRadius' | 'twoHandHoldMs' | 'twoHandProximity' | 'smartShapes' | 'autoConvertShapes' | 'recognitionMode' | 'confirmationHoldMs' | 'shapeEditMode' | 'shapeResizeMode' | 'reactionsEnabled' | 'reactionSlots' | 'reactionIntensity' | 'reactionDurationMs' | 'spatialTransformHoldMs' | 'spatialScaleGain' | 'spatialSmoothing' | 'spatialScaleDeadZone' | 'spatialRotationDeadZoneDeg' | 'fistDepthNear' | 'fistDepthFar'>;
 export function loadHandSettings(base: Settings): Settings {
   try {
     const value = JSON.parse(localStorage.getItem(HAND_SETTINGS_KEY) ?? '{}') as Partial<Stored>;
@@ -34,6 +34,8 @@ export function loadHandSettings(base: Settings): Settings {
     if (typeof value.spatialSmoothing === 'number' && value.spatialSmoothing >= .1 && value.spatialSmoothing <= .8) base.spatialSmoothing = value.spatialSmoothing;
     if (typeof value.spatialScaleDeadZone === 'number' && value.spatialScaleDeadZone >= .01 && value.spatialScaleDeadZone <= .12) base.spatialScaleDeadZone = value.spatialScaleDeadZone;
     if (typeof value.spatialRotationDeadZoneDeg === 'number' && value.spatialRotationDeadZoneDeg >= 1 && value.spatialRotationDeadZoneDeg <= 12) base.spatialRotationDeadZoneDeg = value.spatialRotationDeadZoneDeg;
+    if (typeof value.fistDepthNear === 'number' && value.fistDepthNear >= .03 && value.fistDepthNear <= .6) base.fistDepthNear = value.fistDepthNear;
+    if (typeof value.fistDepthFar === 'number' && value.fistDepthFar >= .03 && value.fistDepthFar <= .6) base.fistDepthFar = value.fistDepthFar;
   } catch { /* Corrupt local preferences fall back to safe defaults. */ }
   return base;
 }
@@ -50,6 +52,7 @@ export function saveHandSettings(settings: Settings): void {
     twoHandHoldMs: settings.twoHandHoldMs, twoHandProximity: settings.twoHandProximity, smartShapes: settings.smartShapes, autoConvertShapes: settings.autoConvertShapes, recognitionMode: settings.recognitionMode,
     confirmationHoldMs: settings.confirmationHoldMs, shapeEditMode: settings.shapeEditMode, shapeResizeMode: settings.shapeResizeMode,
     reactionsEnabled: settings.reactionsEnabled, reactionSlots: settings.reactionSlots.map(slot => ({ ...slot })), reactionIntensity: settings.reactionIntensity, reactionDurationMs: settings.reactionDurationMs,
-    spatialTransformHoldMs: settings.spatialTransformHoldMs, spatialScaleGain: settings.spatialScaleGain, spatialSmoothing: settings.spatialSmoothing, spatialScaleDeadZone: settings.spatialScaleDeadZone, spatialRotationDeadZoneDeg: settings.spatialRotationDeadZoneDeg };
+    spatialTransformHoldMs: settings.spatialTransformHoldMs, spatialScaleGain: settings.spatialScaleGain, spatialSmoothing: settings.spatialSmoothing, spatialScaleDeadZone: settings.spatialScaleDeadZone, spatialRotationDeadZoneDeg: settings.spatialRotationDeadZoneDeg,
+    fistDepthNear: settings.fistDepthNear, fistDepthFar: settings.fistDepthFar };
   try { localStorage.setItem(HAND_SETTINGS_KEY, JSON.stringify(value)); } catch { /* Storage can be unavailable in private mode. */ }
 }
