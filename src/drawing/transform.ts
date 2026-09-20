@@ -1,6 +1,7 @@
 import { BOARD, type BoardObject, type Point, type Settings } from '../core/types';
 import { objectOutline } from './objects';
 import { validPolygon, vertexBounds, withVertices } from './geometry';
+import { localPoint, worldPoint } from './spatial';
 
 export type HandleKind = 'move' | 'corner' | 'edge' | 'vertex' | 'segment' | 'endpoint' | 'radius';
 export interface ShapeHandle { id: string; kind: HandleKind; point: Point; index?: number; axis?: 'x' | 'y'; side?: 'n' | 'e' | 's' | 'w' | 'nw' | 'ne' | 'se' | 'sw' }
@@ -13,18 +14,21 @@ const isLine = (object: BoardObject) => ['line', 'arrow'].includes(object.type);
 export function shapeHandles(object: BoardObject, editMode: Settings['shapeEditMode'], resizeMode: Settings['shapeResizeMode']): ShapeHandle[] {
   const { x, y, width: w, height: h } = object;
   if (isLine(object)) return objectOutline(object).slice(0, 2).map((p, index) => ({ id: `endpoint-${index}`, kind: 'endpoint', point: p, index }));
-  if (object.type === 'circle' || object.type === 'ellipse') return [
-    { id: 'radius-w', kind: 'radius', point: point(x, y + h / 2), side: 'w', axis: 'x' },
-    { id: 'radius-e', kind: 'radius', point: point(x + w, y + h / 2), side: 'e', axis: 'x' },
-    { id: 'radius-n', kind: 'radius', point: point(x + w / 2, y), side: 'n', axis: 'y' },
-    { id: 'radius-s', kind: 'radius', point: point(x + w / 2, y + h), side: 's', axis: 'y' },
-    { id: 'move', kind: 'move', point: point(x + w / 2, y + h / 2) },
-  ];
+  if (object.type === 'circle' || object.type === 'ellipse') {
+    const handles: ShapeHandle[] = [
+      { id: 'radius-w', kind: 'radius', point: point(x, y + h / 2), side: 'w', axis: 'x' },
+      { id: 'radius-e', kind: 'radius', point: point(x + w, y + h / 2), side: 'e', axis: 'x' },
+      { id: 'radius-n', kind: 'radius', point: point(x + w / 2, y), side: 'n', axis: 'y' },
+      { id: 'radius-s', kind: 'radius', point: point(x + w / 2, y + h), side: 's', axis: 'y' },
+      { id: 'move', kind: 'move', point: point(x + w / 2, y + h / 2) },
+    ];
+    return handles.map(handle => ({ ...handle, point: worldPoint(object, handle.point) }));
+  }
   if (editMode === 'points' && object.vertices?.length) {
     const vertices = object.vertices;
     return [
-      ...vertices.map((p, index) => ({ id: `vertex-${index}`, kind: 'vertex' as const, point: p, index })),
-      ...vertices.map((p, index) => ({ id: `edge-${index}`, kind: 'segment' as const, point: midpoint(p, vertices[(index + 1) % vertices.length]), index })),
+      ...vertices.map((p, index) => ({ id: `vertex-${index}`, kind: 'vertex' as const, point: worldPoint(object, p), index })),
+      ...vertices.map((p, index) => ({ id: `edge-${index}`, kind: 'segment' as const, point: worldPoint(object, midpoint(p, vertices[(index + 1) % vertices.length])), index })),
     ];
   }
   const handles: ShapeHandle[] = [
@@ -36,7 +40,7 @@ export function shapeHandles(object: BoardObject, editMode: Settings['shapeEditM
     { id: 'n', kind: 'edge', point: point(x + w / 2, y), side: 'n' }, { id: 'e', kind: 'edge', point: point(x + w, y + h / 2), side: 'e' },
     { id: 's', kind: 'edge', point: point(x + w / 2, y + h), side: 's' }, { id: 'w', kind: 'edge', point: point(x, y + h / 2), side: 'w' },
   );
-  return handles;
+  return handles.map(handle => ({ ...handle, point: worldPoint(object, handle.point) }));
 }
 
 export function nearestShapeHandle(handles: ShapeHandle[], target: Point, radius = 34): ShapeHandle | null {
@@ -57,7 +61,7 @@ function translated(object: BoardObject, target: Point): BoardObject {
 function fromEndpoints(object: BoardObject, endpoints: Point[]): BoardObject | null {
   if (Math.hypot(endpoints[1].x - endpoints[0].x, endpoints[1].y - endpoints[0].y) < 20) return null;
   const [a, b] = endpoints;
-  return { ...object, x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.max(1, Math.abs(b.x - a.x)), height: Math.max(1, Math.abs(b.y - a.y)), flipY: (b.x - a.x) * (b.y - a.y) < 0 };
+  return { ...object, x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.max(1, Math.abs(b.x - a.x)), height: Math.max(1, Math.abs(b.y - a.y)), flipY: (b.x - a.x) * (b.y - a.y) < 0, rotation: 0 };
 }
 
 function resizeBox(object: BoardObject, handle: ShapeHandle, target: Point, mode: Settings['shapeResizeMode']): BoardObject | null {
@@ -136,7 +140,8 @@ export function transformObject(object: BoardObject, handle: ShapeHandle, target
     endpoints[handle.index ?? 0] = point(clamp(target.x, 0, BOARD.width), clamp(target.y, 0, BOARD.height));
     return fromEndpoints(object, endpoints);
   }
-  if (handle.kind === 'radius') return editRadius(object, handle, target, mode);
-  if (handle.kind === 'vertex' || handle.kind === 'segment') return editVertices(object, handle, target);
-  return resizeBox(object, handle, target, mode);
+  const localTarget = localPoint(object, target);
+  if (handle.kind === 'radius') return editRadius(object, handle, localTarget, mode);
+  if (handle.kind === 'vertex' || handle.kind === 'segment') return editVertices(object, handle, localTarget);
+  return resizeBox(object, handle, localTarget, mode);
 }

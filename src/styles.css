@@ -14,3 +14,4 @@
 @keyframes reaction-float{0%{opacity:0;transform:translate(-50%,-50%) scale(.55)}6%{opacity:1;transform:translate(-50%,-50%) scale(1)}60%{opacity:1;transform:translate(calc(-50% + var(--rx)*.35),calc(-50% + var(--ry)*.35)) scale(1)}100%{opacity:0;transform:translate(calc(-50% + var(--rx)),calc(-50% + var(--ry))) scale(.92)}}
 @keyframes reaction-fade{0%{opacity:0}6%{opacity:1}60%{opacity:1}100%{opacity:0}}
 @media(prefers-reduced-motion:reduce){.reaction-effect span{animation-name:reaction-fade!important;transform:translate(-50%,-50%)!important}}
+.shape-edit-bar{max-width:calc(100vw - 24px);white-space:nowrap}.shape-edit-bar span{display:flex;gap:5px}.shape-edit-bar span[hidden]{display:none}

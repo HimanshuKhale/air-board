@@ -31,6 +31,8 @@ import { recognizeDigit } from './drawing/digits';
 import { bounds } from './selection/geometry';
 import { chooseRecognition } from './drawing/smart-recognition';
 import { ReactionLayer } from './reactions/layer';
+import { transformSelection as spatialTransform } from './drawing/spatial';
+import { subdivide } from './drawing/subdivision';
 
 const isPresentation = location.pathname === '/present';
 document.body.classList.toggle('is-presentation', isPresentation);
@@ -70,6 +72,7 @@ const interactions = new InteractionController({
   getState: () => bus.state,
   previewMove: preview => drawing.setMovePreview(preview),
   previewObject: preview => drawing.setObjectPreview(preview),
+  previewObjects: (previews, hiddenIds) => drawing.setObjectPreviews(previews, hiddenIds),
   confirmationPending: () => !!confirmation.request,
   confirmationPose: (pose, confidence, now) => {
     const result = confirmation.observe(pose, confidence, now);
@@ -272,6 +275,22 @@ bindControls(bus, {
     const slot = bus.state.settings.reactionSlots[index]; if (!slot) return;
     emitReaction({ id: crypto.randomUUID(), type: slot.gesture, emoji: slot.emoji, position: { x: .28 + index * .14, y: .45 }, createdAt: Date.now(), duration: bus.state.settings.reactionDurationMs, intensity: bus.state.settings.reactionIntensity });
   },
+  transformSelection: (scale, rotation) => {
+    const before = currentObjects(bus.state.history).filter(object => bus.state.selection.includes(object.id));
+    if (!before.length || before.length !== bus.state.selection.length || before.some(object => object.type === 'connector')) { toast('Select only native shapes, lines or arrows before transforming.'); return; }
+    const after = spatialTransform(before, scale, rotation);
+    if (!after) { toast('That transform would leave the board or exceed the safe scale range.'); return; }
+    bus.send({ type: 'transform-objects', before, after, mode: scale !== 1 && rotation !== 0 ? 'scale-rotate' : scale !== 1 ? 'scale' : 'rotate' });
+  },
+  subdivideSelection: (count, mode = 'equal-area') => {
+    const objects = currentObjects(bus.state.history), selected = objects.filter(object => bus.state.selection.includes(object.id));
+    if (selected.length !== 1 || bus.state.selection.length !== 1) { toast('Select exactly one eligible native object to divide.'); return; }
+    if (objects.some(object => object.type === 'connector' && (object.fromId === selected[0].id || object.toId === selected[0].id))) { toast('Disconnect attached connectors before subdividing this object.'); return; }
+    const result = subdivide(selected[0], count, mode);
+    if (!result) { toast('This object does not support a mathematically valid subdivision.'); return; }
+    bus.send({ type: 'subdivide-object', source: selected[0], pieces: result.pieces, method: result.method, pieceCount: count });
+  },
+  cancelSpatial: () => interactions.cancelSpatialMode(),
   createShape: type => {
     const count = currentObjects(bus.state.history).length;
     const width = ['line', 'arrow'].includes(type) ? 240 : type === 'square' || type === 'circle' ? 150 : 220;
@@ -293,7 +312,7 @@ bus.onChange = (command, requestId) => {
     void background.setImage(bus.state.settings.background.image).then(() => { backgroundDirty = true; }).catch(() => toast('This background image could not be decoded.'));
     const s = bus.state.settings;
     if (command?.type === 'settings' && ('recognitionMode' in command.patch || 'smartShapes' in command.patch) && digitGroup) { clearTimeout(digitGroup.timer); digitGroup = null; }
-    const geometry = JSON.stringify([s.background.mirror, s.background.mode, s.background.fit, s.inputMode, s.dominantHand, s.lassoGesture]);
+    const geometry = JSON.stringify([s.background.mirror, s.background.mode, s.background.fit, s.inputMode, s.dominantHand, s.lassoGesture, s.objectGestureMode]);
     if (geometry !== previousGeometry) { previousGeometry = geometry; releaseHand(); }
     if (s.paused !== previousPaused) { previousPaused = s.paused; interactions.cancelActive(); input.endHand(); }
     video.style.transform = s.background.mirror ? 'scaleX(-1)' : '';
@@ -393,6 +412,7 @@ function render(now: number): void {
       `Gesture: ${interaction.instantaneousGesture}; stable: ${interaction.stableGesture}; enter: ${Math.round(interaction.gestureEnterMs)} ms`,
       `Confirmation: ${interaction.confirmationGesture} (${interaction.confirmationConfidence.toFixed(2)}); four-fingertip pinch: ${interaction.fourFingertipConfidence.toFixed(2)}`,
       `Reaction: ${interaction.reactionGesture} (${interaction.reactionConfidence.toFixed(2)}); state: ${interaction.reactionState}`,
+      `Spatial: ${s.objectGestureMode}; state: ${interaction.spatialState}; scale ${interaction.spatialScale.toFixed(2)}; angle ${(interaction.spatialAngle * 180 / Math.PI).toFixed(1)}°; chops ${interaction.chopCount}`,
       `Active interaction: ${interaction.interaction}; hand control: ${interaction.handControl}`,
       `Two-hand close: ${interaction.twoHandClose}; hold: ${Math.round(interaction.twoHandHeldMs)} ms`,
       `Lasso active: ${interaction.lassoActive}; selected strokes: ${interaction.selectedStrokeCount}; grabbed: ${interaction.grabbedStrokeId ?? 'none'}`,

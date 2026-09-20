@@ -2,6 +2,7 @@ import type { BoardObject, Point, Settings, Stroke } from '../core/types';
 import type { InteractionVisuals } from '../interaction/controller';
 import { bounds } from '../selection/geometry';
 import { shapeHandles } from '../drawing/transform';
+import { objectOutline } from '../drawing/objects';
 
 export function drawInteractionOverlay(ctx: CanvasRenderingContext2D, visuals: InteractionVisuals, strokes: Stroke[], selectedIds: string[], objects: BoardObject[] = [], settings?: Settings): void {
   ctx.save();
@@ -11,13 +12,18 @@ export function drawInteractionOverlay(ctx: CanvasRenderingContext2D, visuals: I
     if (visuals.lassoStart) { ctx.setLineDash([]); ctx.fillStyle = '#3b6fe8'; ctx.beginPath(); ctx.arc(visuals.lassoStart.x, visuals.lassoStart.y, 8, 0, Math.PI * 2); ctx.fill(); }
   }
   const selected = strokes.filter(stroke => selectedIds.includes(stroke.id));
-  const selectedObjects = objects.filter(object => selectedIds.includes(object.id));
+  const previews = new Map(visuals.objectPreviews.map(object => [object.id, object]));
+  const selectedObjects = objects.filter(object => selectedIds.includes(object.id)).map(object => previews.get(object.id) ?? object);
   if (selected.length || selectedObjects.length) {
-    const all = [...selected.flatMap(stroke => stroke.points), ...selectedObjects.flatMap(object => [{ x: object.x, y: object.y }, { x: object.x + object.width, y: object.y + object.height }])];
+    const all = [...selected.flatMap(stroke => stroke.points), ...selectedObjects.flatMap(objectOutline)];
     const box = bounds(all); const padding = 12;
     ctx.strokeStyle = '#3b6fe8'; ctx.fillStyle = 'rgba(59,111,232,.06)'; ctx.lineWidth = 3; ctx.setLineDash([12, 8]);
     ctx.fillRect(box.minX - padding, box.minY - padding, box.maxX - box.minX + padding * 2, box.maxY - box.minY + padding * 2);
     ctx.strokeRect(box.minX - padding, box.minY - padding, box.maxX - box.minX + padding * 2, box.maxY - box.minY + padding * 2);
+  }
+  if (visuals.spatialLabel) {
+    ctx.setLineDash([]); ctx.font = 'bold 24px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(34,61,48,.92)'; ctx.fillRect(700, 28, 200, 48); ctx.fillStyle = '#fff'; ctx.fillText(visuals.spatialLabel, 800, 52);
   }
   if (selectedObjects.length === 1 && !selected.length && settings && !['text', 'connector'].includes(selectedObjects[0].type)) {
     const object = visuals.objectPreview?.id === selectedObjects[0].id ? visuals.objectPreview : selectedObjects[0];

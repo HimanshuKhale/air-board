@@ -9,7 +9,7 @@ export type ShapeKind = 'line' | 'square' | 'rectangle' | 'parallelogram' | 'tra
 /** All geometry uses the fixed logical board. Lines and connectors may descend with flipY. */
 export interface BoardObject {
   id: string; type: ShapeKind; x: number; y: number; width: number; height: number;
-  color: string; strokeWidth: number; text: string; flipY?: boolean;
+  color: string; strokeWidth: number; text: string; flipY?: boolean; rotation?: number;
   fromId?: string; toId?: string;
   /** Absolute logical-board vertices preserve irregular polygons during free editing. */
   vertices?: Point[]; regular?: boolean;
@@ -30,7 +30,9 @@ export type DrawAction =
   | { kind: 'delete'; id: string }
   | { kind: 'replace'; strokeId: string; object: BoardObject }
   | { kind: 'replace-many'; strokeIds: string[]; object: BoardObject }
-  | { kind: 'diagram'; objects: BoardObject[] };
+  | { kind: 'diagram'; objects: BoardObject[] }
+  | { kind: 'transform'; before: BoardObject[]; after: BoardObject[]; mode: 'scale' | 'rotate' | 'scale-rotate' }
+  | { kind: 'subdivide'; source: BoardObject; pieces: BoardObject[]; method: 'equal-length' | 'equal-area' | 'similar'; pieceCount: number };
 export interface BackgroundSettings {
   mode: 'blank' | 'camera' | 'image'; color: string; image: string | null;
   fit: Fit; mirror: boolean; dim: number; positionX: number; positionY: number;
@@ -50,6 +52,9 @@ export interface Settings {
   lassoGesture: 'four-fingertip' | 'index-only'; lassoHoldMs: number;
   confirmationHoldMs: number;
   shapeEditMode: 'scale' | 'points'; shapeResizeMode: 'proportional' | 'free';
+  objectGestureMode: 'move' | 'scale' | 'rotate' | 'cut';
+  spatialTransformHoldMs: number; spatialScaleGain: number; spatialSmoothing: number;
+  spatialScaleDeadZone: number; spatialRotationDeadZoneDeg: number;
   reactionsEnabled: boolean; reactionSlots: ReactionSlot[];
   reactionIntensity: 'subtle' | 'normal'; reactionDurationMs: number;
 }

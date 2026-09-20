@@ -19,8 +19,11 @@ import type { BoardObject } from '../core/types';
 import { PenWritingController } from './pen-writing';
 import { ReactionController, type ReactionState } from '../reactions/controller';
 import { classifyReactionPose } from '../reactions/pose';
+import { classifyThreeFingerTransform, SpatialTransformController, type SpatialTransformState } from './three-finger-transform';
+import { ChopController, classifyChopPose, type ChopState } from './chop';
+import { subdivide } from '../drawing/subdivision';
 
-export type InteractionMode = 'hover' | 'write' | 'erase' | 'lasso' | 'drag' | 'shape-transform' | 'plane-calibration' | 'stylus-calibration';
+export type InteractionMode = 'hover' | 'write' | 'erase' | 'lasso' | 'drag' | 'shape-transform' | 'spatial-transform' | 'cut-counting' | 'plane-calibration' | 'stylus-calibration';
 export interface InteractionDiagnostics {
   dominantHand: 'Left' | 'Right'; detectedHands: string[]; instantaneousGesture: StaticGesture;
   stableGesture: StaticGesture; gestureEnterMs: number; interaction: InteractionMode;
@@ -30,6 +33,7 @@ export interface InteractionDiagnostics {
   confirmationGesture: ConfirmationPose; confirmationConfidence: number;
   writingHand: 'Left' | 'Right'; confirmationHand: 'Left' | 'Right'; penDown: boolean; fourFingertipConfidence: number;
   reactionState: ReactionState; reactionGesture: string; reactionConfidence: number;
+  spatialState: SpatialTransformState; chopState: ChopState; chopCount: number; spatialScale: number; spatialAngle: number;
 }
 export interface InteractionHooks {
   send(command: Command): void;
@@ -41,12 +45,13 @@ export interface InteractionHooks {
   toast(message: string): void;
   previewMove?(preview: MovePreview | null): void;
   previewObject?(preview: BoardObject | null): void;
+  previewObjects?(previews: BoardObject[] | null, hiddenIds?: string[]): void;
   confirmationPending?(): boolean;
   confirmationPose?(pose: ConfirmationPose, confidence: number, now: number): void;
   confirmationInterrupted?(): void;
   reaction?(event: ReactionEvent): void;
 }
-export interface InteractionVisuals { lasso: Point[]; lassoStart: Point | null; planeTarget: number | null; planeCaptured: Point[]; movePreview: MovePreview | null; objectPreview: BoardObject | null; stylusTarget: boolean }
+export interface InteractionVisuals { lasso: Point[]; lassoStart: Point | null; planeTarget: number | null; planeCaptured: Point[]; movePreview: MovePreview | null; objectPreview: BoardObject | null; objectPreviews: BoardObject[]; spatialLabel: string | null; chopCount: number; stylusTarget: boolean }
 
 export class InteractionController {
   pointer: HandPointer | null = null;
@@ -57,13 +62,18 @@ export class InteractionController {
     inputMode: 'finger', virtualNibPoint: null, twoHandClose: false, twoHandHeldMs: 0, confirmationGesture: 'neutral', confirmationConfidence: 0,
     writingHand: 'Right', confirmationHand: 'Left', penDown: false, fourFingertipConfidence: 0,
     reactionState: 'IDLE', reactionGesture: 'neutral', reactionConfidence: 0,
+    spatialState: 'IDLE', chopState: 'ARMED', chopCount: 0, spatialScale: 1, spatialAngle: 0,
   };
-  readonly visuals: InteractionVisuals = { lasso: [], lassoStart: null, planeTarget: null, planeCaptured: [], movePreview: null, objectPreview: null, stylusTarget: false };
+  readonly visuals: InteractionVisuals = { lasso: [], lassoStart: null, planeTarget: null, planeCaptured: [], movePreview: null, objectPreview: null, objectPreviews: [], spatialLabel: null, chopCount: 0, stylusTarget: false };
   private gesture = new GestureController();
   private pen = new PenWritingController();
   private pose = new PoseStabilizer();
   private twoHand = new TwoHandToggle();
   private reaction = new ReactionController();
+  private spatial = new SpatialTransformController();
+  private chop = new ChopController();
+  private spatialMode: Settings['objectGestureMode'] = 'move';
+  private cutPreview: { source: BoardObject; pieces: BoardObject[]; method: 'equal-length' | 'equal-area' | 'similar' } | null = null;
   private palmFilter = new ExponentialFilter(0.55);
   private fistFilter = new ExponentialFilter(0.55);
   private eraserId: string | null = null;
@@ -92,6 +102,7 @@ export class InteractionController {
     this.diagnostics.inputMode = settings.inputMode;
     this.diagnostics.selectedStrokeCount = this.hooks.getState().selection.length;
     this.diagnostics.planeCalibrationValid = !!settings.planePoints;
+    if (this.spatialMode !== settings.objectGestureMode) { this.cancelSpatial(); this.spatialMode = settings.objectGestureMode; }
     const hands = result.allLandmarks.map((landmarks, index) => {
       const categories = result.stats.handedness[index] ?? [], raw = handednessName(categories), name = anatomicalHandedness(categories, false, .7);
       const gesture = landmarks.length === 21 ? classifyPose(landmarks, size, settings.pinchClose).gesture : 'neutral';
@@ -112,7 +123,9 @@ export class InteractionController {
     } else {
       this.diagnostics.confirmationGesture = 'neutral'; this.diagnostics.confirmationConfidence = 0;
     }
-    const operationActive = !!this.shapeTransform || !!this.lasso.length || this.pen.down || this.erasing || !!this.drag;
+    if (confirmationPending && (this.spatial.state !== 'IDLE' || this.chop.count)) this.cancelSpatial();
+    const externalWriting = !!this.hooks.getState().history.active;
+    const operationActive = !!this.shapeTransform || !!this.lasso.length || this.pen.down || this.erasing || !!this.drag || this.spatial.state === 'ACTIVE' || this.chop.count > 0 || externalWriting;
     const proximityClose = twoHandsClose(hands.map(hand => hand.landmarks), size, settings.twoHandProximity);
     const toggleHandControl = confirmationPending || operationActive ? false : this.twoHand.update(hands.map(hand => hand.landmarks), size, now, settings.twoHandHoldMs, settings.twoHandProximity);
     this.diagnostics.twoHandClose = confirmationPending ? false : proximityClose; this.diagnostics.twoHandHeldMs = this.twoHand.state.heldMs;
@@ -125,9 +138,21 @@ export class InteractionController {
       this.hooks.toast(paused ? 'Hand Control Paused. Mouse and touch remain available.' : 'Hand Control Enabled.');
       return;
     }
-    if (!confirmationPending && !operationActive && proximityClose) { this.reaction.suppress(); this.syncReactionDiagnostics(); this.hooks.endPinch(); this.diagnostics.interaction = 'hover'; return; }
+    if (!confirmationPending && !operationActive && proximityClose) { this.reaction.suppress(); this.cancelSpatial(); this.syncReactionDiagnostics(); this.hooks.endPinch(); this.diagnostics.interaction = 'hover'; return; }
     if (settings.paused) { this.reaction.suppress(); this.syncReactionDiagnostics(); this.cancelActive(); this.diagnostics.handControl = 'paused'; return; }
     const calibrating = !!this.planeCapture || this.stylusCapture;
+    const dominant = hands.find(hand => hand.name === settings.dominantHand && hand.landmarks.length === 21);
+    const selectedObjects = currentObjects(this.hooks.getState().history).filter(object => this.hooks.getState().selection.includes(object.id));
+    if (settings.objectGestureMode !== 'move' && externalWriting) { this.reaction.suppress(); this.syncReactionDiagnostics(); return; }
+    if (settings.objectGestureMode !== 'move' && this.hooks.getState().selection.length && selectedObjects.length !== this.hooks.getState().selection.length) { this.reaction.suppress(); this.syncReactionDiagnostics(); return; }
+    const spatialArmed = !confirmationPending && !calibrating && (!proximityClose || this.spatial.state === 'ACTIVE') && settings.objectGestureMode !== 'move' && selectedObjects.length > 0 && selectedObjects.length === this.hooks.getState().selection.length;
+    if (spatialArmed) {
+      this.reaction.suppress(); this.syncReactionDiagnostics(); this.cancelBoardOperationsForSpatial();
+      if (!dominant) { this.cancelSpatial(); return; }
+      if (settings.objectGestureMode === 'cut') this.updateCut(dominant.landmarks, size, now, selectedObjects);
+      else if (settings.objectGestureMode === 'scale' || settings.objectGestureMode === 'rotate') this.updateSpatialTransform(dominant.landmarks, size, now, selectedObjects, settings.objectGestureMode);
+      return;
+    }
     if (confirmationPending || calibrating || proximityClose || !settings.reactionsEnabled) this.reaction.suppress();
     else {
       const source = hands.find(hand => hand.name === confirmationHand && hand.landmarks.length === 21);
@@ -139,7 +164,6 @@ export class InteractionController {
       } else this.reaction.trackingLost();
     }
     this.syncReactionDiagnostics();
-    const dominant = hands.find(hand => hand.name === settings.dominantHand && hand.landmarks.length === 21);
     if (!dominant) { this.cancelActive(); return; }
     if (this.lastDominant && this.lastDominant !== dominant.name) this.reset();
     this.lastDominant = dominant.name;
@@ -272,6 +296,68 @@ export class InteractionController {
     this.stylusCapture = false; this.visuals.stylusTarget = false;
     this.hooks.send({ type: 'settings', patch: { stylusOffset: { x: 0, y: 0 } } });
     this.hooks.toast('Pen Writing virtual nib offset reset.');
+  }
+  cancelSpatialMode(): void { this.cancelSpatial(); }
+  private cancelBoardOperationsForSpatial(): void {
+    if (this.shapeTransform) this.endShapeTransform(false);
+    if (this.drag) this.endDrag(false);
+    if (this.erasing) this.endErase();
+    if (this.lasso.length) this.cancelLasso();
+    this.hooks.endPinch();
+    this.gesture.reset(); this.pen.reset(); this.pose.reset(); this.pointer = null;
+  }
+  private updateSpatialTransform(points: Point[], size: Size, now: number, selected: BoardObject[], mode: 'scale' | 'rotate'): void {
+    if (selected.some(object => object.type === 'connector')) {
+      this.hooks.toast('Attached connectors cannot be transformed directly. Select their shapes instead.');
+      this.hooks.send({ type: 'settings', patch: { objectGestureMode: 'move' } }); return;
+    }
+    const settings = this.hooks.getState().settings;
+    const pose = classifyThreeFingerTransform(points, size), update = this.spatial.update(pose, selected, mode, now, {
+      holdMs: settings.spatialTransformHoldMs, gain: settings.spatialScaleGain, smoothing: settings.spatialSmoothing,
+      scaleDeadZone: settings.spatialScaleDeadZone, rotationDeadZone: settings.spatialRotationDeadZoneDeg * Math.PI / 180,
+    });
+    this.diagnostics.spatialState = this.spatial.state; this.diagnostics.spatialScale = update.scale; this.diagnostics.spatialAngle = update.angle;
+    this.diagnostics.interaction = 'spatial-transform';
+    this.visuals.spatialLabel = mode === 'scale' ? `${Math.round(update.scale * 100)}%` : `${update.angle >= 0 ? '+' : ''}${Math.round(update.angle * 180 / Math.PI)}°`;
+    if (update.preview) { this.visuals.objectPreviews = update.preview; this.hooks.previewObjects?.(update.preview); }
+    if (update.commit) {
+      this.hooks.previewObjects?.(null); this.visuals.objectPreviews = []; this.visuals.spatialLabel = null;
+      this.hooks.send({ type: 'transform-objects', ...update.commit });
+    }
+    const mapped = this.hooks.map(pose.anchor, size, settings);
+    this.hooks.showPointer(mapped, 22, this.spatial.state === 'ACTIVE', mode === 'scale' ? 'S' : 'R');
+  }
+  private updateCut(points: Point[], size: Size, now: number, selected: BoardObject[]): void {
+    this.diagnostics.interaction = 'cut-counting';
+    if (selected.length !== 1) { this.hooks.toast('Cut mode requires exactly one selected object.'); this.hooks.send({ type: 'settings', patch: { objectGestureMode: 'move' } }); return; }
+    const pose = classifyChopPose(points, size), update = this.chop.update(pose, size, now);
+    this.diagnostics.chopState = this.chop.state; this.diagnostics.chopCount = update.count; this.visuals.chopCount = update.count;
+    this.visuals.spatialLabel = `Cut count: ${update.count}`;
+    if (update.counted) {
+      this.hooks.toast(`Cut count: ${update.count}`);
+      if (update.count >= 2) {
+        const scene = currentObjects(this.hooks.getState().history);
+        const attached = scene.some(object => object.type === 'connector' && (object.fromId === selected[0].id || object.toId === selected[0].id));
+        const result = attached ? null : subdivide(selected[0], update.count);
+        this.cutPreview = result ? { source: selected[0], pieces: result.pieces, method: result.method } : null;
+        this.visuals.objectPreviews = result?.pieces ?? [];
+        this.hooks.previewObjects?.(result?.pieces ?? null, result ? [selected[0].id] : []);
+        if (!result) this.hooks.toast('This object does not support a correct subdivision. The original is unchanged.');
+      }
+    }
+    if (update.finalize) {
+      if (update.count >= 2 && this.cutPreview) {
+        this.hooks.send({ type: 'subdivide-object', source: this.cutPreview.source, pieces: this.cutPreview.pieces, method: this.cutPreview.method, pieceCount: update.count });
+        this.hooks.toast(`Created ${update.count} independently editable pieces.`);
+      } else this.hooks.toast(update.count === 1 ? 'One chop requests one piece, so the object was not divided.' : 'Subdivision cancelled; the original is unchanged.');
+      this.cancelSpatial(); this.hooks.send({ type: 'settings', patch: { objectGestureMode: 'move' } }); return;
+    }
+    const mapped = this.hooks.map(pose.center, size, this.hooks.getState().settings);
+    this.hooks.showPointer(mapped, 22, this.chop.state === 'SWIPING', 'C');
+  }
+  private cancelSpatial(): void {
+    this.spatial.cancel(); this.chop.reset(); this.cutPreview = null; this.visuals.objectPreviews = []; this.visuals.spatialLabel = null; this.visuals.chopCount = 0;
+    this.hooks.previewObjects?.(null); Object.assign(this.diagnostics, { spatialState: 'IDLE', chopState: 'ARMED', chopCount: 0, spatialScale: 1, spatialAngle: 0 });
   }
   private capturePlanePoint(point: Point, phase: PinchPhase): void {
     if (!this.planeCapture || phase !== 'pinchStart') return;
@@ -409,6 +495,7 @@ export class InteractionController {
     if (commit && transform && JSON.stringify(transform.baseline) !== JSON.stringify(transform.preview)) this.hooks.send({ type: 'update-object', object: transform.preview });
   }
   cancelActive(): void {
+    this.cancelSpatial();
     this.endShapeTransform(false); this.endDrag(false); this.endErase(); this.cancelLasso(); this.hooks.endPinch(); this.gesture.reset(); this.pen.reset(); this.pose.reset(); this.palmFilter.reset(); this.fistFilter.reset(); this.lastDominant = null; this.blockedPose = null; this.lassoCandidateAt = null; this.lassoGestureLatched = false; this.lassoBlocked = false;
     this.pointer = null;
     Object.assign(this.diagnostics, { instantaneousGesture: 'neutral', stableGesture: 'neutral', gestureEnterMs: 0, interaction: 'hover', rawPoint: null, mappedPoint: null, virtualNibPoint: null, grabbedStrokeId: null, penDown: false, fourFingertipConfidence: 0 });

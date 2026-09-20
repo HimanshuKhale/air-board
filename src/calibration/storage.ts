@@ -1,7 +1,7 @@
 import type { Point, Settings } from '../core/types';
 import { homographyFromQuad } from './homography';
 export const HAND_SETTINGS_KEY = 'saai-airboard-hand-settings-v2';
-type Stored = Pick<Settings, 'dominantHand' | 'gestureSensitivity' | 'inputMode' | 'stylusOffset' | 'penGripHoldMs' | 'openPalmHoldMs' | 'palmEraserSize' | 'planePoints' | 'lassoCloseRadius' | 'lassoGesture' | 'lassoHoldMs' | 'fistGrabRadius' | 'twoHandHoldMs' | 'twoHandProximity' | 'smartShapes' | 'autoConvertShapes' | 'recognitionMode' | 'confirmationHoldMs' | 'shapeEditMode' | 'shapeResizeMode' | 'reactionsEnabled' | 'reactionSlots' | 'reactionIntensity' | 'reactionDurationMs'>;
+type Stored = Pick<Settings, 'dominantHand' | 'gestureSensitivity' | 'inputMode' | 'stylusOffset' | 'penGripHoldMs' | 'openPalmHoldMs' | 'palmEraserSize' | 'planePoints' | 'lassoCloseRadius' | 'lassoGesture' | 'lassoHoldMs' | 'fistGrabRadius' | 'twoHandHoldMs' | 'twoHandProximity' | 'smartShapes' | 'autoConvertShapes' | 'recognitionMode' | 'confirmationHoldMs' | 'shapeEditMode' | 'shapeResizeMode' | 'reactionsEnabled' | 'reactionSlots' | 'reactionIntensity' | 'reactionDurationMs' | 'spatialTransformHoldMs' | 'spatialScaleGain' | 'spatialSmoothing' | 'spatialScaleDeadZone' | 'spatialRotationDeadZoneDeg'>;
 export function loadHandSettings(base: Settings): Settings {
   try {
     const value = JSON.parse(localStorage.getItem(HAND_SETTINGS_KEY) ?? '{}') as Partial<Stored>;
@@ -29,6 +29,11 @@ export function loadHandSettings(base: Settings): Settings {
     if (validReactionSlots(value.reactionSlots)) base.reactionSlots = value.reactionSlots.map(slot => ({ ...slot }));
     if (value.reactionIntensity === 'subtle' || value.reactionIntensity === 'normal') base.reactionIntensity = value.reactionIntensity;
     if (typeof value.reactionDurationMs === 'number' && value.reactionDurationMs >= 1500 && value.reactionDurationMs <= 4000) base.reactionDurationMs = value.reactionDurationMs;
+    if (typeof value.spatialTransformHoldMs === 'number' && value.spatialTransformHoldMs >= 150 && value.spatialTransformHoldMs <= 500) base.spatialTransformHoldMs = value.spatialTransformHoldMs;
+    if (typeof value.spatialScaleGain === 'number' && value.spatialScaleGain >= .5 && value.spatialScaleGain <= 3) base.spatialScaleGain = value.spatialScaleGain;
+    if (typeof value.spatialSmoothing === 'number' && value.spatialSmoothing >= .1 && value.spatialSmoothing <= .8) base.spatialSmoothing = value.spatialSmoothing;
+    if (typeof value.spatialScaleDeadZone === 'number' && value.spatialScaleDeadZone >= .01 && value.spatialScaleDeadZone <= .12) base.spatialScaleDeadZone = value.spatialScaleDeadZone;
+    if (typeof value.spatialRotationDeadZoneDeg === 'number' && value.spatialRotationDeadZoneDeg >= 1 && value.spatialRotationDeadZoneDeg <= 12) base.spatialRotationDeadZoneDeg = value.spatialRotationDeadZoneDeg;
   } catch { /* Corrupt local preferences fall back to safe defaults. */ }
   return base;
 }
@@ -44,6 +49,7 @@ export function saveHandSettings(settings: Settings): void {
     palmEraserSize: settings.palmEraserSize, planePoints: settings.planePoints, lassoCloseRadius: settings.lassoCloseRadius, lassoGesture: settings.lassoGesture, lassoHoldMs: settings.lassoHoldMs, fistGrabRadius: settings.fistGrabRadius,
     twoHandHoldMs: settings.twoHandHoldMs, twoHandProximity: settings.twoHandProximity, smartShapes: settings.smartShapes, autoConvertShapes: settings.autoConvertShapes, recognitionMode: settings.recognitionMode,
     confirmationHoldMs: settings.confirmationHoldMs, shapeEditMode: settings.shapeEditMode, shapeResizeMode: settings.shapeResizeMode,
-    reactionsEnabled: settings.reactionsEnabled, reactionSlots: settings.reactionSlots.map(slot => ({ ...slot })), reactionIntensity: settings.reactionIntensity, reactionDurationMs: settings.reactionDurationMs };
+    reactionsEnabled: settings.reactionsEnabled, reactionSlots: settings.reactionSlots.map(slot => ({ ...slot })), reactionIntensity: settings.reactionIntensity, reactionDurationMs: settings.reactionDurationMs,
+    spatialTransformHoldMs: settings.spatialTransformHoldMs, spatialScaleGain: settings.spatialScaleGain, spatialSmoothing: settings.spatialSmoothing, spatialScaleDeadZone: settings.spatialScaleDeadZone, spatialRotationDeadZoneDeg: settings.spatialRotationDeadZoneDeg };
   try { localStorage.setItem(HAND_SETTINGS_KEY, JSON.stringify(value)); } catch { /* Storage can be unavailable in private mode. */ }
 }

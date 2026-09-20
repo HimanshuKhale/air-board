@@ -1,10 +1,12 @@
 import { BOARD, type BoardObject, type Brush, type DrawAction, type HistoryState, type Point, type Stroke } from '../core/types';
 import { attachedConnector } from './objects';
+import { objectBounds } from './objects';
+import { translatedObject } from './spatial';
 export const MAX_POINTS = 12000;
 export interface MovePreview { ids: string[]; dx: number; dy: number }
 export interface Scene { strokes: Stroke[]; objects: BoardObject[] }
 const translatedStroke = (stroke: Stroke, dx: number, dy: number): Stroke => ({ ...stroke, brush: { ...stroke.brush }, points: stroke.points.map(point => ({ x: point.x + dx, y: point.y + dy })) });
-const translatedObject = (object: BoardObject, dx: number, dy: number): BoardObject => ({ ...object, x: object.x + dx, y: object.y + dy, vertices: object.vertices?.map(point => ({ x: point.x + dx, y: point.y + dy })) });
+const cloneObject = (object: BoardObject): BoardObject => ({ ...object, vertices: object.vertices?.map(point => ({ ...point })) });
 function commit(history: HistoryState, action: DrawAction): void {
   finishStroke(history);
   history.actions.splice(history.position);
@@ -36,8 +38,9 @@ export function moveStrokes(history: HistoryState, ids: string[], dx: number, dy
   if (!unique.length || !Number.isFinite(dx) || !Number.isFinite(dy) || Math.hypot(dx, dy) < 0.5) return;
   const objects = currentScene(history).objects.filter(object => unique.includes(object.id));
   if (objects.length) {
-    dx = Math.max(-Math.min(...objects.map(object => object.x)), Math.min(BOARD.width - Math.max(...objects.map(object => object.x + object.width)), dx));
-    dy = Math.max(-Math.min(...objects.map(object => object.y)), Math.min(BOARD.height - Math.max(...objects.map(object => object.y + object.height)), dy));
+    const boxes = objects.map(objectBounds);
+    dx = Math.max(-Math.min(...boxes.map(box => box.x)), Math.min(BOARD.width - Math.max(...boxes.map(box => box.x + box.width)), dx));
+    dy = Math.max(-Math.min(...boxes.map(box => box.y)), Math.min(BOARD.height - Math.max(...boxes.map(box => box.y + box.height)), dy));
   }
   if (Math.hypot(dx, dy) < 0.5) return;
   commit(history, { kind: 'move', ids: unique, dx, dy });
@@ -71,6 +74,19 @@ export function createDiagram(history: HistoryState, objects: BoardObject[]): bo
   if (objects.some(item => item.fromId && (!ids.has(item.fromId) || !ids.has(item.toId!)))) return false;
   commit(history, { kind: 'diagram', objects }); return true;
 }
+export function transformObjects(history: HistoryState, before: BoardObject[], after: BoardObject[], mode: 'scale' | 'rotate' | 'scale-rotate'): boolean {
+  const scene = currentScene(history), current = new Map(scene.objects.map(object => [object.id, object]));
+  if (!before.length || before.length !== after.length || before.some(object => object.type === 'connector') || new Set(before.map(object => object.id)).size !== before.length ||
+    before.some(object => !current.has(object.id) || JSON.stringify(current.get(object.id)) !== JSON.stringify(object)) || after.some((object, index) => object.id !== before[index].id)) return false;
+  commit(history, { kind: 'transform', before: before.map(cloneObject), after: after.map(cloneObject), mode }); return true;
+}
+export function subdivideObject(history: HistoryState, source: BoardObject, pieces: BoardObject[], method: 'equal-length' | 'equal-area' | 'similar', pieceCount: number): boolean {
+  const scene = currentScene(history), current = scene.objects.find(object => object.id === source.id);
+  const ids = new Set(scene.objects.map(object => object.id));
+  if (!current || JSON.stringify(current) !== JSON.stringify(source) || pieceCount < 2 || pieceCount !== pieces.length || pieces.some(piece => ids.has(piece.id)) ||
+    new Set(pieces.map(piece => piece.id)).size !== pieces.length || scene.objects.some(object => object.type === 'connector' && (object.fromId === source.id || object.toId === source.id))) return false;
+  commit(history, { kind: 'subdivide', source: cloneObject(source), pieces: pieces.map(cloneObject), method, pieceCount }); return true;
+}
 /** Replays the single history timeline, so old stroke-only snapshots remain valid. */
 export function currentScene(history: HistoryState, preview: MovePreview | null = null): Scene {
   let strokes: Stroke[] = [], objects: BoardObject[] = [];
@@ -85,12 +101,17 @@ export function currentScene(history: HistoryState, preview: MovePreview | null 
           const moved = translatedObject(object, action.dx, action.dy);
           return object.type === 'connector' && object.fromId && !action.ids.includes(object.fromId) && !action.ids.includes(object.toId!) ? { ...moved, fromId: undefined, toId: undefined } : moved;
         }); break;
-      case 'create': objects.push({ ...action.object }); break;
-      case 'update': objects = objects.map(object => object.id === action.object.id ? { ...action.object } : object); break;
+      case 'create': objects.push(cloneObject(action.object)); break;
+      case 'update': objects = objects.map(object => object.id === action.object.id ? cloneObject(action.object) : object); break;
       case 'delete': objects = objects.filter(object => object.id !== action.id); break;
-      case 'replace': strokes = strokes.filter(stroke => stroke.id !== action.strokeId); objects.push({ ...action.object }); break;
-      case 'replace-many': strokes = strokes.filter(stroke => !action.strokeIds.includes(stroke.id)); objects.push({ ...action.object }); break;
-      case 'diagram': objects.push(...action.objects.map(object => ({ ...object }))); break;
+      case 'replace': strokes = strokes.filter(stroke => stroke.id !== action.strokeId); objects.push(cloneObject(action.object)); break;
+      case 'replace-many': strokes = strokes.filter(stroke => !action.strokeIds.includes(stroke.id)); objects.push(cloneObject(action.object)); break;
+      case 'diagram': objects.push(...action.objects.map(cloneObject)); break;
+      case 'transform': {
+        const replacements = new Map(action.after.map(object => [object.id, object]));
+        objects = objects.map(object => replacements.has(object.id) ? cloneObject(replacements.get(object.id)!) : object); break;
+      }
+      case 'subdivide': objects = objects.filter(object => object.id !== action.source.id).concat(action.pieces.map(cloneObject)); break;
     }
   }
   if (history.active) strokes.push(translatedStroke(history.active, 0, 0));

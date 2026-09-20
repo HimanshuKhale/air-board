@@ -106,6 +106,12 @@ export class BoardChannel {
       this.state.settings.reactionSlots ??= defaults().reactionSlots;
       this.state.settings.reactionIntensity ??= 'normal';
       this.state.settings.reactionDurationMs ??= 2500;
+      this.state.settings.objectGestureMode ??= 'move';
+      this.state.settings.spatialTransformHoldMs ??= 220;
+      this.state.settings.spatialScaleGain ??= 1.5;
+      this.state.settings.spatialSmoothing ??= .35;
+      this.state.settings.spatialScaleDeadZone ??= .03;
+      this.state.settings.spatialRotationDeadZoneDeg ??= 3;
       this.applied = new Set(m.applied as string[]);
       for (const id of this.applied) this.unacknowledged.delete(id);
       this.ready = true; this.onChange(); this.flush();

@@ -10,6 +10,8 @@ export const defaults = (): Settings => ({
   smartShapes: true, autoConvertShapes: false, recognitionMode: 'shapes',
   lassoGesture: 'four-fingertip', lassoHoldMs: 220,
   confirmationHoldMs: 400, shapeEditMode: 'scale', shapeResizeMode: 'proportional',
+  objectGestureMode: 'move',
+  spatialTransformHoldMs: 220, spatialScaleGain: 1.5, spatialSmoothing: .35, spatialScaleDeadZone: .03, spatialRotationDeadZoneDeg: 3,
   reactionsEnabled: true,
   reactionSlots: [
     { gesture: 'thumbs-up', emoji: '👍', enabled: true },

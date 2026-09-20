@@ -30,7 +30,8 @@ export class DrawingEngine {
   private dirty = true;
   private historyDirty = true;
   private movePreview: MovePreview | null = null;
-  private objectPreview: BoardObject | null = null;
+  private objectPreviews: BoardObject[] = [];
+  private hiddenPreviewIds = new Set<string>();
   constructor(readonly canvas: HTMLCanvasElement) {
     canvas.width = this.committed.width = BOARD.width;
     canvas.height = this.committed.height = BOARD.height;
@@ -39,14 +40,17 @@ export class DrawingEngine {
   }
   invalidate(committed = true): void { this.dirty = true; this.historyDirty ||= committed; }
   setMovePreview(preview: MovePreview | null): void { this.movePreview = preview; this.dirty = true; }
-  setObjectPreview(preview: BoardObject | null): void { this.objectPreview = preview; this.dirty = true; }
+  setObjectPreview(preview: BoardObject | null): void { this.setObjectPreviews(preview ? [preview] : []); }
+  setObjectPreviews(previews: BoardObject[] | null, hiddenIds: string[] = []): void { this.objectPreviews = previews?.map(object => ({ ...object, vertices: object.vertices?.map(point => ({ ...point })) })) ?? []; this.hiddenPreviewIds = new Set(hiddenIds); this.dirty = true; }
   render(history: HistoryState): void {
     if (!this.dirty) return;
-    if (this.movePreview || this.objectPreview) {
+    if (this.movePreview || this.objectPreviews.length) {
       this.context.clearRect(0, 0, BOARD.width, BOARD.height);
       const scene = currentScene(history, this.movePreview);
       for (const stroke of scene.strokes) paintStroke(this.context, stroke);
-      for (const object of scene.objects) paintObject(this.context, this.objectPreview?.id === object.id ? this.objectPreview : object);
+      const previews = new Map(this.objectPreviews.map(object => [object.id, object]));
+      for (const object of scene.objects) if (!this.hiddenPreviewIds.has(object.id)) paintObject(this.context, previews.get(object.id) ?? object);
+      for (const object of this.objectPreviews) if (!scene.objects.some(item => item.id === object.id)) paintObject(this.context, object);
       this.dirty = false; return;
     }
     if (this.historyDirty) {

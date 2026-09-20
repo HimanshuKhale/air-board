@@ -11,6 +11,9 @@ export interface ControlsActions {
   createShape(type: ShapeKind): void;
   verifyHand(hand: 'Left' | 'Right'): void;
   previewReaction(slot: number): void;
+  transformSelection(scale: number, rotation: number): void;
+  subdivideSelection(count: number, mode?: 'equal-area' | 'similar'): void;
+  cancelSpatial(): void;
 }
 export function bindControls(bus: BoardChannel, actions: ControlsActions): void {
   const sendSettings = (patch: Partial<Settings>) => { actions.interrupt(); bus.send({ type: 'settings', patch }); };
@@ -49,6 +52,17 @@ export function bindControls(bus: BoardChannel, actions: ControlsActions): void 
       case 'shape-points': sendSettings({ shapeEditMode: 'points' }); break;
       case 'resize-proportional': sendSettings({ shapeResizeMode: 'proportional' }); break;
       case 'resize-free': sendSettings({ shapeResizeMode: 'free' }); break;
+      case 'object-move': case 'object-scale': case 'object-rotate': case 'object-cut':
+        if (!bus.state.selection.length || currentObjects(bus.state.history).filter(object => bus.state.selection.includes(object.id)).length !== bus.state.selection.length) { actions.toast('Spatial editing supports native-object selections; freehand strokes remain unchanged.'); break; }
+        actions.cancelSpatial(); sendSettings({ objectGestureMode: action.slice(7) as Settings['objectGestureMode'] }); break;
+      case 'object-scale-down': actions.transformSelection(.8, 0); break;
+      case 'object-scale-up': actions.transformSelection(1.25, 0); break;
+      case 'object-rotate-left': actions.transformSelection(1, -Math.PI / 12); break;
+      case 'object-rotate-right': actions.transformSelection(1, Math.PI / 12); break;
+      case 'object-divide-two': actions.subdivideSelection(2); break;
+      case 'object-divide-three': actions.subdivideSelection(3); break;
+      case 'object-divide-similar': actions.subdivideSelection(4, 'similar'); break;
+      case 'object-cancel': actions.cancelSpatial(); sendSettings({ objectGestureMode: 'move' }); break;
       case 'background': actions.interrupt(); dialog('background-dialog').showModal(); moveCursorToDialog(dialog('background-dialog')); actions.reveal(); break;
       case 'close-background': dialog('background-dialog').close(); break;
       case 'bg-blank': case 'bg-camera': case 'bg-image':
@@ -104,7 +118,7 @@ export function bindControls(bus: BoardChannel, actions: ControlsActions): void 
       case 'lassoGesture': sendSettings({ lassoGesture: input.value as Settings['lassoGesture'] }); break;
       case 'gestureSensitivity': sendSettings({ gestureSensitivity: input.value as Settings['gestureSensitivity'] }); break;
       case 'reactionIntensity': sendSettings({ reactionIntensity: input.value as Settings['reactionIntensity'] }); break;
-      case 'openPalmHoldMs': case 'palmEraserSize': case 'lassoCloseRadius': case 'lassoHoldMs': case 'penGripHoldMs': case 'fistGrabRadius': case 'twoHandHoldMs': case 'twoHandProximity': case 'confirmationHoldMs': case 'reactionDurationMs': sendSettings({ [name]: Number(input.value) }); break;
+      case 'openPalmHoldMs': case 'palmEraserSize': case 'lassoCloseRadius': case 'lassoHoldMs': case 'penGripHoldMs': case 'fistGrabRadius': case 'twoHandHoldMs': case 'twoHandProximity': case 'confirmationHoldMs': case 'reactionDurationMs': case 'spatialTransformHoldMs': case 'spatialScaleGain': case 'spatialSmoothing': case 'spatialScaleDeadZone': case 'spatialRotationDeadZoneDeg': sendSettings({ [name]: Number(input.value) }); break;
       case 'smoothing': case 'pinchClose': case 'pinchOpen': case 'debounceMs': sendSettings({ [name]: Number(input.value) }); break;
     }
   });
@@ -139,8 +153,8 @@ export function updateControls(bus: BoardChannel): void {
   const { settings: s, history: h } = bus.state;
   document.querySelectorAll<HTMLButtonElement>('[data-action]').forEach(button => {
     const action = button.dataset.action;
-    const pressed = action === s.brush.tool || action === 'bg-' + s.background.mode || (action === 'pause' && s.paused) || action === `shape-${s.shapeEditMode}` || action === `resize-${s.shapeResizeMode}`;
-    if (['pen', 'highlighter', 'eraser', 'bg-blank', 'bg-camera', 'bg-image', 'pause', 'shape-scale', 'shape-points', 'resize-proportional', 'resize-free'].includes(action ?? '')) button.setAttribute('aria-pressed', String(pressed));
+    const pressed = action === s.brush.tool || action === 'bg-' + s.background.mode || (action === 'pause' && s.paused) || action === `shape-${s.shapeEditMode}` || action === `resize-${s.shapeResizeMode}` || action === `object-${s.objectGestureMode}`;
+    if (['pen', 'highlighter', 'eraser', 'bg-blank', 'bg-camera', 'bg-image', 'pause', 'shape-scale', 'shape-points', 'resize-proportional', 'resize-free', 'object-move', 'object-scale', 'object-rotate', 'object-cut'].includes(action ?? '')) button.setAttribute('aria-pressed', String(pressed));
     if (action === 'undo') button.disabled = !h.position && !h.active;
     if (action === 'redo') button.disabled = h.position >= h.actions.length || !!h.active;
   });
@@ -149,7 +163,7 @@ export function updateControls(bus: BoardChannel): void {
     const key = input.dataset.setting!;
     const values: Record<string, string | number | boolean> = { ink: s.brush.color, size: s.brush.size, opacity: s.brush.opacity, 'board-color': s.background.color,
       fit: s.background.fit, mirror: s.background.mirror, dim: s.background.dim, positionX: s.background.positionX, positionY: s.background.positionY, smoothing: s.smoothing, pinchClose: s.pinchClose, pinchOpen: s.pinchOpen, debounceMs: s.debounceMs, autoHide: s.autoHide,
-      dominantHand: s.dominantHand, inputMode: s.inputMode, recognitionMode: s.recognitionMode, lassoGesture: s.lassoGesture, gestureSensitivity: s.gestureSensitivity, openPalmHoldMs: s.openPalmHoldMs, palmEraserSize: s.palmEraserSize, lassoCloseRadius: s.lassoCloseRadius, lassoHoldMs: s.lassoHoldMs, penGripHoldMs: s.penGripHoldMs, fistGrabRadius: s.fistGrabRadius, twoHandHoldMs: s.twoHandHoldMs, twoHandProximity: s.twoHandProximity, smartShapes: s.smartShapes, autoConvertShapes: s.autoConvertShapes, confirmationHoldMs: s.confirmationHoldMs, reactionsEnabled: s.reactionsEnabled, reactionIntensity: s.reactionIntensity, reactionDurationMs: s.reactionDurationMs };
+      dominantHand: s.dominantHand, inputMode: s.inputMode, recognitionMode: s.recognitionMode, lassoGesture: s.lassoGesture, gestureSensitivity: s.gestureSensitivity, openPalmHoldMs: s.openPalmHoldMs, palmEraserSize: s.palmEraserSize, lassoCloseRadius: s.lassoCloseRadius, lassoHoldMs: s.lassoHoldMs, penGripHoldMs: s.penGripHoldMs, fistGrabRadius: s.fistGrabRadius, twoHandHoldMs: s.twoHandHoldMs, twoHandProximity: s.twoHandProximity, smartShapes: s.smartShapes, autoConvertShapes: s.autoConvertShapes, confirmationHoldMs: s.confirmationHoldMs, reactionsEnabled: s.reactionsEnabled, reactionIntensity: s.reactionIntensity, reactionDurationMs: s.reactionDurationMs, spatialTransformHoldMs: s.spatialTransformHoldMs, spatialScaleGain: s.spatialScaleGain, spatialSmoothing: s.spatialSmoothing, spatialScaleDeadZone: s.spatialScaleDeadZone, spatialRotationDeadZoneDeg: s.spatialRotationDeadZoneDeg };
     if (input.type === 'checkbox') input.checked = Boolean(values[key]);
     else if (String(values[key]) !== input.value) input.value = String(values[key]);
   });
@@ -164,5 +178,8 @@ export function updateControls(bus: BoardChannel): void {
   document.querySelectorAll<HTMLElement>('[data-plane-status]').forEach(status => { status.textContent = s.planePoints ? 'Calibrated · four camera-space corners saved locally' : 'Not calibrated'; });
   const selected = currentObjects(h).filter(object => bus.state.selection.includes(object.id));
   const editBar = document.getElementById('shape-edit-bar');
-  if (editBar) editBar.hidden = selected.length !== 1 || ['text', 'connector'].includes(selected[0]?.type);
+  if (editBar) editBar.hidden = !bus.state.selection.length;
+  document.querySelectorAll<HTMLElement>('[data-spatial-controls]').forEach(group => { group.hidden = group.dataset.spatialControls !== s.objectGestureMode; });
+  document.querySelectorAll<HTMLElement>('[data-single-shape-controls]').forEach(group => { group.hidden = selected.length !== 1 || ['text', 'connector'].includes(selected[0]?.type); });
+  document.querySelectorAll<HTMLButtonElement>('[data-action="object-divide-similar"]').forEach(button => { button.hidden = selected.length !== 1 || selected[0].type !== 'triangle'; });
 }

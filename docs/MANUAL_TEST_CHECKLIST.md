@@ -88,6 +88,21 @@ Record laptop/CPU, Windows version, Chrome/Edge version, webcam, lighting, date,
 - [ ] Trigger several reactions and export both PNG variants while one is visible. Confirm reactions, hand overlays and reaction previews are absent from the files. Close either window during an effect and confirm the remaining window cleans up normally.
 - [ ] Enable the operating system reduced-motion preference. Confirm reactions remain briefly visible and fade without floating or scaling.
 
+## Spatial transform and subdivision gateway
+
+- [ ] Connect the normal drawing pad/stylus. Draw before, during and after hand tracking is enabled; tablet pointer input remains available and is never converted into a three-finger or chop gesture.
+- [ ] Select one native shape and choose Scale. With the physical dominant hand, constrain thumb/index and hold middle/ring/pinky in a mid-range pose for the configured interval. Open those three fingers to grow and curl them to shrink. Confirm the live percentage is stable, release commits one undo step, and tracking loss cancels the preview.
+- [ ] Select two or more native objects and repeat Scale. Confirm their shared center remains fixed, relative layout is preserved, one Undo restores every original geometry, and one Redo reproduces the exact result.
+- [ ] Choose Rotate and reacquire the three-finger pose. Rotate the hand in the camera image plane across the ±180° boundary; confirm the angle does not jump. Verify lines, arrows, rectangles, triangles, polygons and ellipses render, select, lasso, resize and export at their rotated geometry.
+- [ ] Confirm transform mode never activates with no selected native object. While a transform is active, try fist, open palm, lasso, Pen Writing and a left-hand reaction; only the selected transform owns the manipulating hand. Pause, change mode, stop camera or hide the hand and confirm the baseline returns unless release explicitly committed.
+- [ ] Select a line, choose Cut, and make three deliberate hand-edge swipes with a return/release between them. Confirm feedback reads Cut count 1, 2 and 3, a three-piece preview appears, and inactivity commits exactly three equal-length independently selectable segments.
+- [ ] Make one chop and wait. Confirm the original remains unchanged. Try slow repositioning, tremor and held/repeated frames; none count as extra chops. Use Cancel during a preview and verify the original remains.
+- [ ] Subdivide a triangle into three pieces. Measure or inspect vertices and confirm equal area through one edge split to the opposite vertex; do not describe the three pieces as similar. Test the separate four-piece Similar construction.
+- [ ] Divide a rectangle and a convex polygon into 2–12 equal-area regions. Undo restores the exact source; redo restores the same piece IDs and geometry in Studio and Presentation.
+- [ ] Rotate a line before subdivision and confirm all segments remain collinear and cover the original. For an arrow, confirm only the terminal piece retains the arrowhead.
+- [ ] Confirm circles, ellipses, text, freehand strokes, concave/invalid polygons and connectors stay unchanged with a clear unsupported message. Confirm a shape referenced by a connector cannot be subdivided; transforming the shape keeps the connector attached to updated geometry.
+- [ ] Use contextual 80%/125%, ±15°, and 2/3-piece controls with mouse, touch and tablet stylus. Confirm these commands use the same atomic history and synchronization path as gestures.
+
 ## Intelligence V1: real microphone and webcam acceptance
 
 - [ ] With the AI service stopped, draw, pinch, erase, undo and export normally. Typed commands in Commands mode still work.

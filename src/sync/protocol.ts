@@ -1,5 +1,5 @@
 import type { BoardObject, BoardState, Brush, Point, ReactionEmoji, ReactionGesture, Settings } from '../core/types';
-import { appendPoint, beginStroke, clear, createDiagram, createObject, deleteObject, finishStroke, moveStrokes, redo, replaceStroke, replaceStrokes, undo, updateObject } from '../drawing/history';
+import { appendPoint, beginStroke, clear, createDiagram, createObject, deleteObject, finishStroke, moveStrokes, redo, replaceStroke, replaceStrokes, subdivideObject, transformObjects, undo, updateObject } from '../drawing/history';
 import { homographyFromQuad } from '../calibration/homography';
 import { validPolygon, vertexBounds } from '../drawing/geometry';
 export type Command =
@@ -15,6 +15,8 @@ export type Command =
   | { type: 'replace-stroke'; strokeId: string; object: BoardObject }
   | { type: 'replace-strokes'; strokeIds: string[]; object: BoardObject }
   | { type: 'create-diagram'; objects: BoardObject[]; requestId: string; baseRevision: number }
+  | { type: 'transform-objects'; before: BoardObject[]; after: BoardObject[]; mode: 'scale' | 'rotate' | 'scale-rotate' }
+  | { type: 'subdivide-object'; source: BoardObject; pieces: BoardObject[]; method: 'equal-length' | 'equal-area' | 'similar'; pieceCount: number }
   | { type: 'undo' | 'redo' | 'clear' };
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const range = (v: unknown, min: number, max: number): v is number => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
@@ -27,17 +29,29 @@ export function validBoardObject(v: unknown): v is BoardObject {
   if (!object(v) || !id(v.id) || !['line', 'square', 'rectangle', 'parallelogram', 'trapezoid', 'pentagon', 'hexagon', 'polygon', 'circle', 'ellipse', 'triangle', 'arrow', 'text', 'connector'].includes(String(v.type)) ||
     !range(v.x, 0, 1600) || !range(v.y, 0, 900) || !range(v.width, 1, 1600) || !range(v.height, 1, 900) ||
     (v.x as number) + (v.width as number) > 1600 || (v.y as number) + (v.height as number) > 900 || !color(v.color) || !range(v.strokeWidth, 1, 100) ||
-    typeof v.text !== 'string' || v.text.length > 200 || /[<>]/.test(v.text) || (v.flipY !== undefined && typeof v.flipY !== 'boolean') ||
+    typeof v.text !== 'string' || v.text.length > 200 || /[<>]/.test(v.text) || (v.flipY !== undefined && typeof v.flipY !== 'boolean') || (v.rotation !== undefined && !range(v.rotation, -Math.PI, Math.PI)) ||
     !((v.fromId === undefined && v.toId === undefined) || (v.type === 'connector' && id(v.fromId) && id(v.toId) && v.fromId !== v.toId)) ||
     (v.regular !== undefined && typeof v.regular !== 'boolean') ||
-    !Object.keys(v).every(key => ['id', 'type', 'x', 'y', 'width', 'height', 'color', 'strokeWidth', 'text', 'flipY', 'fromId', 'toId', 'vertices', 'regular'].includes(key))) return false;
+    !Object.keys(v).every(key => ['id', 'type', 'x', 'y', 'width', 'height', 'color', 'strokeWidth', 'text', 'flipY', 'rotation', 'fromId', 'toId', 'vertices', 'regular'].includes(key))) return false;
   if (v.vertices !== undefined) {
     if (!Array.isArray(v.vertices) || !validPolygon(v.vertices as Point[])) return false;
     const b = vertexBounds(v.vertices as Point[]);
     if (Math.abs(b.x - (v.x as number)) > .01 || Math.abs(b.y - (v.y as number)) > .01 || Math.abs(b.width - (v.width as number)) > .01 || Math.abs(b.height - (v.height as number)) > .01) return false;
   }
+  if (v.rotation) {
+    const x = v.x as number, y = v.y as number, width = v.width as number, height = v.height as number, cx = x + width / 2, cy = y + height / 2;
+    const cosine = Math.cos(v.rotation as number), sine = Math.sin(v.rotation as number);
+    if ([[x, y], [x + width, y], [x + width, y + height], [x, y + height]].some(([px, py]) => {
+      const dx = px - cx, dy = py - cy, wx = cx + dx * cosine - dy * sine, wy = cy + dx * sine + dy * cosine;
+      return wx < 0 || wx > 1600 || wy < 0 || wy > 900;
+    })) return false;
+  }
   return v.type !== 'polygon' || Array.isArray(v.vertices);
 }
+const validTransformSet = (before: unknown, after: unknown, mode: unknown): boolean => Array.isArray(before) && Array.isArray(after) && before.length > 0 && before.length <= 100 && before.length === after.length && before.every(validBoardObject) && after.every(validBoardObject) &&
+  new Set(before.map(item => (item as BoardObject).id)).size === before.length && before.every((item, index) => (item as BoardObject).id === (after as BoardObject[])[index].id) && ['scale', 'rotate', 'scale-rotate'].includes(String(mode));
+const validSubdivision = (source: unknown, pieces: unknown, method: unknown, pieceCount: unknown): boolean => validBoardObject(source) && Array.isArray(pieces) && Number.isInteger(pieceCount) && range(pieceCount, 2, 12) && pieces.length === pieceCount && pieces.every(validBoardObject) &&
+  new Set(pieces.map(item => (item as BoardObject).id)).size === pieces.length && !pieces.some(item => (item as BoardObject).id === (source as BoardObject).id) && ['equal-length', 'equal-area', 'similar'].includes(String(method));
 const planePoints = (v: unknown): v is Point[] | null => {
   if (v === null) return true;
   if (!Array.isArray(v) || v.length !== 4 || !v.every(p => object(p) && range(p.x, -1, 2) && range(p.y, -1, 2))) return false;
@@ -78,6 +92,12 @@ export function validSettingsPatch(v: unknown): v is Partial<Settings> {
       case 'confirmationHoldMs': return range(value, 300, 500);
       case 'shapeEditMode': return value === 'scale' || value === 'points';
       case 'shapeResizeMode': return value === 'proportional' || value === 'free';
+      case 'objectGestureMode': return ['move', 'scale', 'rotate', 'cut'].includes(String(value));
+      case 'spatialTransformHoldMs': return range(value, 150, 500);
+      case 'spatialScaleGain': return range(value, .5, 3);
+      case 'spatialSmoothing': return range(value, .1, .8);
+      case 'spatialScaleDeadZone': return range(value, .01, .12);
+      case 'spatialRotationDeadZoneDeg': return range(value, 1, 12);
       case 'reactionsEnabled': return typeof value === 'boolean';
       case 'reactionSlots': return reactionSlots(value);
       case 'reactionIntensity': return value === 'subtle' || value === 'normal';
@@ -100,17 +120,21 @@ export function validCommand(v: unknown): v is Command {
     case 'replace-stroke': return id(v.strokeId) && validBoardObject(v.object);
     case 'replace-strokes': return Array.isArray(v.strokeIds) && v.strokeIds.length > 0 && v.strokeIds.length <= 4 && v.strokeIds.every(id) && new Set(v.strokeIds).size === v.strokeIds.length && validBoardObject(v.object);
     case 'create-diagram': return id(v.requestId) && Number.isInteger(v.baseRevision) && range(v.baseRevision, 0, Number.MAX_SAFE_INTEGER) && Array.isArray(v.objects) && v.objects.length > 0 && v.objects.length <= 100 && v.objects.every(validBoardObject) && new Set(v.objects.map(o => (o as BoardObject).id)).size === v.objects.length;
+    case 'transform-objects': return validTransformSet(v.before, v.after, v.mode);
+    case 'subdivide-object': return validSubdivision(v.source, v.pieces, v.method, v.pieceCount);
     case 'undo': case 'redo': case 'clear': return true;
     default: return false;
   }
 }
 export function validState(v: unknown): v is BoardState {
-  const requiredSettings = ['brush', 'background', 'smoothing', 'pinchClose', 'pinchOpen', 'debounceMs', 'paused', 'autoHide', 'dominantHand', 'gestureSensitivity', 'inputMode', 'stylusOffset', 'penGripHoldMs', 'openPalmHoldMs', 'palmEraserSize', 'planePoints', 'lassoCloseRadius', 'lassoGesture', 'lassoHoldMs', 'fistGrabRadius', 'twoHandHoldMs', 'twoHandProximity', 'smartShapes', 'recognitionMode', 'reactionsEnabled', 'reactionSlots', 'reactionIntensity', 'reactionDurationMs'];
+  const requiredSettings = ['brush', 'background', 'smoothing', 'pinchClose', 'pinchOpen', 'debounceMs', 'paused', 'autoHide', 'dominantHand', 'gestureSensitivity', 'inputMode', 'stylusOffset', 'penGripHoldMs', 'openPalmHoldMs', 'palmEraserSize', 'planePoints', 'lassoCloseRadius', 'lassoGesture', 'lassoHoldMs', 'fistGrabRadius', 'twoHandHoldMs', 'twoHandProximity', 'smartShapes', 'recognitionMode', 'reactionsEnabled', 'reactionSlots', 'reactionIntensity', 'reactionDurationMs', 'objectGestureMode', 'spatialTransformHoldMs', 'spatialScaleGain', 'spatialSmoothing', 'spatialScaleDeadZone', 'spatialRotationDeadZoneDeg'];
   if (!object(v) || !object(v.settings) || !validSettingsPatch(v.settings) || !requiredSettings.every(key => Object.hasOwn(v.settings as object, key)) || !object(v.history) || !Array.isArray(v.selection) || !v.selection.every(id)) return false;
   const h = v.history;
   const stroke = (s: unknown) => object(s) && id(s.id) && validBrush(s.brush) && Array.isArray(s.points) && s.points.length > 0 && s.points.length <= 12000 && s.points.every(point);
   return Array.isArray(h.actions) && h.actions.every(a => object(a) && (a.kind === 'clear' || (a.kind === 'stroke' && stroke(a.stroke)) || (a.kind === 'move' && Array.isArray(a.ids) && a.ids.length > 0 && a.ids.every(id) && range(a.dx, -3200, 3200) && range(a.dy, -1800, 1800)) ||
-    ((a.kind === 'create' || a.kind === 'update') && validBoardObject(a.object)) || (a.kind === 'delete' && id(a.id)) || (a.kind === 'replace' && id(a.strokeId) && validBoardObject(a.object)) || (a.kind === 'replace-many' && Array.isArray(a.strokeIds) && a.strokeIds.length > 0 && a.strokeIds.length <= 4 && a.strokeIds.every(id) && validBoardObject(a.object)) || (a.kind === 'diagram' && Array.isArray(a.objects) && a.objects.length <= 100 && a.objects.every(validBoardObject)))) &&
+    ((a.kind === 'create' || a.kind === 'update') && validBoardObject(a.object)) || (a.kind === 'delete' && id(a.id)) || (a.kind === 'replace' && id(a.strokeId) && validBoardObject(a.object)) || (a.kind === 'replace-many' && Array.isArray(a.strokeIds) && a.strokeIds.length > 0 && a.strokeIds.length <= 4 && a.strokeIds.every(id) && validBoardObject(a.object)) || (a.kind === 'diagram' && Array.isArray(a.objects) && a.objects.length <= 100 && a.objects.every(validBoardObject)) ||
+    (a.kind === 'transform' && validTransformSet(a.before, a.after, a.mode)) ||
+    (a.kind === 'subdivide' && validSubdivision(a.source, a.pieces, a.method, a.pieceCount)))) &&
     Number.isInteger(h.position) && range(h.position, 0, h.actions.length) && (h.active === null || stroke(h.active));
 }
 export function reduce(state: BoardState, command: Command): void {
@@ -130,6 +154,8 @@ export function reduce(state: BoardState, command: Command): void {
     case 'replace-stroke': replaceStroke(state.history, command.strokeId, command.object); state.selection = state.selection.map(id => id === command.strokeId ? command.object.id : id); break;
     case 'replace-strokes': replaceStrokes(state.history, command.strokeIds, command.object); state.selection = [...new Set(state.selection.map(id => command.strokeIds.includes(id) ? command.object.id : id))]; break;
     case 'create-diagram': createDiagram(state.history, command.objects); break;
+    case 'transform-objects': transformObjects(state.history, command.before, command.after, command.mode); state.selection = command.after.map(object => object.id); break;
+    case 'subdivide-object': subdivideObject(state.history, command.source, command.pieces, command.method, command.pieceCount); state.selection = command.pieces.map(object => object.id); break;
     case 'undo': undo(state.history); state.selection = []; break;
     case 'redo': redo(state.history); state.selection = []; break;
     case 'clear': clear(state.history); state.selection = []; break;
