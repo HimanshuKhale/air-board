@@ -36,6 +36,16 @@ export function dialogs(): string {
     <h3>Smart shapes</h3>
     <label class="check-field"><input type="checkbox" data-setting="smartShapes"> Automatically clean confident strokes</label>
     <label class="field">Smart recognition<select data-setting="recognitionMode"><option value="shapes">Shapes</option><option value="digits">Digits 0–9</option><option value="mixed">Mixed (conservative)</option></select></label>
+    <section class="reaction-settings"><h3>Left-hand reactions</h3>
+      <label class="check-field"><input type="checkbox" data-setting="reactionsEnabled"> Enable reactions</label>
+      <p class="muted">Thumbs-up is ready by default. Finger heart is an opt-in landmark-only mapping pending real-camera acceptance. V and shaka stay off by default and are suspended during confirmations.</p>
+      ${[
+        ['Thumbs-up', '👍'], ['Finger heart', '❤️'], ['V sign', '🎉'], ['Shaka', '🤙'],
+      ].map(([label, emoji], index) => `<div class="reaction-slot"><label><input type="checkbox" data-reaction-slot="${index}"> ${label}</label><select data-reaction-slot="${index}" aria-label="${label} reaction"><option>👍</option><option>❤️</option><option>🎉</option><option>🤙</option><option>👏</option><option>⭐</option></select><button type="button" data-action="preview-reaction" data-slot="${index}" aria-label="Preview ${label}">${emoji}</button></div>`).join('')}
+      <label class="field">Effect intensity<select data-setting="reactionIntensity"><option value="subtle">Subtle</option><option value="normal">Normal</option></select></label>
+      <label class="field">Animation duration<input type="range" min="1500" max="4000" step="250" data-setting="reactionDurationMs" aria-label="Reaction animation duration"></label>
+      <button type="button" data-action="reset-reactions">Restore reaction defaults</button>
+    </section>
     <label class="field">Pen opacity<input type="range" min="0.05" max="1" step="0.05" data-setting="opacity" aria-label="Pen opacity"></label>
     <div class="dialog-actions">${button('reset-settings', 'Reset calibration', 'undo')}${button('close-settings', 'Done', 'chevron', 'class="primary"')}</div>
     <p class="shortcut-note">P Pen · H Highlighter · E Eraser · Ctrl+Z Undo · Ctrl+Y Redo · F Fullscreen · T Toolbar · Space Pause hand</p>

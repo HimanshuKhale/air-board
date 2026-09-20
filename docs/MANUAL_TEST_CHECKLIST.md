@@ -76,6 +76,18 @@ Record laptop/CPU, Windows version, Chrome/Edge version, webcam, lighting, date,
 - [ ] Test a longer teaching session, many strokes, undo and export. Watch memory/performance.
 - [ ] Save before closing the last app window: session drawings are intentionally memory-only.
 
+## Left-hand reactions
+
+- [ ] With Right selected as the writing hand, hold a clear physical-left thumbs-up for about 260 ms. Confirm exactly one 👍 appears near the left hand, remains anchored, and disappears after about 2.5 seconds. Keep holding past the animation and confirm it does not repeat until release and a fresh hold.
+- [ ] Draw continuously with the physical right hand while triggering the left thumbs-up. Confirm the stroke remains continuous in Studio and Presentation and Undo still contains only the drawing action.
+- [ ] Test the finger-heart classifier at several distances, hand rotations and lighting levels. Compare a Korean finger heart against an ordinary thumb-index pinch, Pen Writing grip and five-tip lasso. Record false positives and false negatives before treating this mapping as classroom-ready; 21 landmarks do not directly measure finger crossing or depth contact.
+- [ ] Enable the optional V and shaka reaction slots. With no confirmation pending, verify their chosen emoji mappings. Start a pending confirmation and confirm physical-left V means YES, shaka means NO, and neither produces an emoji.
+- [ ] Bring both palm centers inside the pause proximity while beginning a reaction. Confirm reaction candidacy stops before pause/resume activates. Confirm paused hand control never emits reactions.
+- [ ] Open Reaction Settings in Studio. Disable reactions and confirm right-hand writing still works. Change slot emojis, intensity and duration, reload, and confirm the local preferences persist. Restore defaults and verify finger heart, V and shaka return to disabled.
+- [ ] Use each Studio preview and verify the same event type and board position appears once in Presentation. Open a late Presentation window after the effect expires and confirm it does not replay.
+- [ ] Trigger several reactions and export both PNG variants while one is visible. Confirm reactions, hand overlays and reaction previews are absent from the files. Close either window during an effect and confirm the remaining window cleans up normally.
+- [ ] Enable the operating system reduced-motion preference. Confirm reactions remain briefly visible and fade without floating or scaling.
+
 ## Intelligence V1: real microphone and webcam acceptance
 
 - [ ] With the AI service stopped, draw, pinch, erase, undo and export normally. Typed commands in Commands mode still work.

@@ -10,5 +10,13 @@ export const defaults = (): Settings => ({
   smartShapes: true, autoConvertShapes: false, recognitionMode: 'shapes',
   lassoGesture: 'four-fingertip', lassoHoldMs: 220,
   confirmationHoldMs: 400, shapeEditMode: 'scale', shapeResizeMode: 'proportional',
+  reactionsEnabled: true,
+  reactionSlots: [
+    { gesture: 'thumbs-up', emoji: '👍', enabled: true },
+    { gesture: 'finger-heart', emoji: '❤️', enabled: false },
+    { gesture: 'v-sign', emoji: '🎉', enabled: false },
+    { gesture: 'shaka', emoji: '🤙', enabled: false },
+  ],
+  reactionIntensity: 'normal', reactionDurationMs: 2500,
 });
 export const initialState = (): BoardState => ({ settings: defaults(), history: { actions: [], position: 0, active: null }, selection: [] });

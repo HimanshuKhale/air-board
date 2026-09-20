@@ -1,7 +1,7 @@
 import type { Point, Settings } from '../core/types';
 import { homographyFromQuad } from './homography';
 export const HAND_SETTINGS_KEY = 'saai-airboard-hand-settings-v2';
-type Stored = Pick<Settings, 'dominantHand' | 'gestureSensitivity' | 'inputMode' | 'stylusOffset' | 'penGripHoldMs' | 'openPalmHoldMs' | 'palmEraserSize' | 'planePoints' | 'lassoCloseRadius' | 'lassoGesture' | 'lassoHoldMs' | 'fistGrabRadius' | 'twoHandHoldMs' | 'twoHandProximity' | 'smartShapes' | 'autoConvertShapes' | 'recognitionMode' | 'confirmationHoldMs' | 'shapeEditMode' | 'shapeResizeMode'>;
+type Stored = Pick<Settings, 'dominantHand' | 'gestureSensitivity' | 'inputMode' | 'stylusOffset' | 'penGripHoldMs' | 'openPalmHoldMs' | 'palmEraserSize' | 'planePoints' | 'lassoCloseRadius' | 'lassoGesture' | 'lassoHoldMs' | 'fistGrabRadius' | 'twoHandHoldMs' | 'twoHandProximity' | 'smartShapes' | 'autoConvertShapes' | 'recognitionMode' | 'confirmationHoldMs' | 'shapeEditMode' | 'shapeResizeMode' | 'reactionsEnabled' | 'reactionSlots' | 'reactionIntensity' | 'reactionDurationMs'>;
 export function loadHandSettings(base: Settings): Settings {
   try {
     const value = JSON.parse(localStorage.getItem(HAND_SETTINGS_KEY) ?? '{}') as Partial<Stored>;
@@ -25,6 +25,10 @@ export function loadHandSettings(base: Settings): Settings {
     if (typeof value.confirmationHoldMs === 'number' && value.confirmationHoldMs >= 300 && value.confirmationHoldMs <= 500) base.confirmationHoldMs = value.confirmationHoldMs;
     if (value.shapeEditMode === 'scale' || value.shapeEditMode === 'points') base.shapeEditMode = value.shapeEditMode;
     if (value.shapeResizeMode === 'proportional' || value.shapeResizeMode === 'free') base.shapeResizeMode = value.shapeResizeMode;
+    if (typeof value.reactionsEnabled === 'boolean') base.reactionsEnabled = value.reactionsEnabled;
+    if (validReactionSlots(value.reactionSlots)) base.reactionSlots = value.reactionSlots.map(slot => ({ ...slot }));
+    if (value.reactionIntensity === 'subtle' || value.reactionIntensity === 'normal') base.reactionIntensity = value.reactionIntensity;
+    if (typeof value.reactionDurationMs === 'number' && value.reactionDurationMs >= 1500 && value.reactionDurationMs <= 4000) base.reactionDurationMs = value.reactionDurationMs;
   } catch { /* Corrupt local preferences fall back to safe defaults. */ }
   return base;
 }
@@ -33,10 +37,13 @@ const validStoredPoints = (value: unknown): value is Point[] | null => {
   if (!Array.isArray(value) || value.length !== 4 || !value.every(p => p && Number.isFinite(p.x) && Number.isFinite(p.y))) return false;
   try { homographyFromQuad(value as Point[]); return true; } catch { return false; }
 };
+const validReactionSlots = (value: unknown): value is Settings['reactionSlots'] => Array.isArray(value) && value.length === 4 && value.every(slot => slot &&
+  ['thumbs-up', 'finger-heart', 'v-sign', 'shaka'].includes(String(slot.gesture)) && ['👍', '❤️', '🎉', '🤙', '👏', '⭐'].includes(String(slot.emoji)) && typeof slot.enabled === 'boolean') && new Set(value.map(slot => slot.gesture)).size === 4;
 export function saveHandSettings(settings: Settings): void {
   const value: Stored = { dominantHand: settings.dominantHand, gestureSensitivity: settings.gestureSensitivity, inputMode: settings.inputMode, stylusOffset: settings.stylusOffset, penGripHoldMs: settings.penGripHoldMs, openPalmHoldMs: settings.openPalmHoldMs,
     palmEraserSize: settings.palmEraserSize, planePoints: settings.planePoints, lassoCloseRadius: settings.lassoCloseRadius, lassoGesture: settings.lassoGesture, lassoHoldMs: settings.lassoHoldMs, fistGrabRadius: settings.fistGrabRadius,
     twoHandHoldMs: settings.twoHandHoldMs, twoHandProximity: settings.twoHandProximity, smartShapes: settings.smartShapes, autoConvertShapes: settings.autoConvertShapes, recognitionMode: settings.recognitionMode,
-    confirmationHoldMs: settings.confirmationHoldMs, shapeEditMode: settings.shapeEditMode, shapeResizeMode: settings.shapeResizeMode };
+    confirmationHoldMs: settings.confirmationHoldMs, shapeEditMode: settings.shapeEditMode, shapeResizeMode: settings.shapeResizeMode,
+    reactionsEnabled: settings.reactionsEnabled, reactionSlots: settings.reactionSlots.map(slot => ({ ...slot })), reactionIntensity: settings.reactionIntensity, reactionDurationMs: settings.reactionDurationMs };
   try { localStorage.setItem(HAND_SETTINGS_KEY, JSON.stringify(value)); } catch { /* Storage can be unavailable in private mode. */ }
 }

@@ -14,6 +14,13 @@ export interface BoardObject {
   /** Absolute logical-board vertices preserve irregular polygons during free editing. */
   vertices?: Point[]; regular?: boolean;
 }
+export type ReactionGesture = 'thumbs-up' | 'finger-heart' | 'v-sign' | 'shaka';
+export type ReactionEmoji = '👍' | '❤️' | '🎉' | '🤙' | '👏' | '⭐';
+export interface ReactionSlot { gesture: ReactionGesture; emoji: ReactionEmoji; enabled: boolean }
+export interface ReactionEvent {
+  id: string; type: ReactionGesture; emoji: ReactionEmoji; position: Point;
+  createdAt: number; duration: number; intensity: 'subtle' | 'normal';
+}
 export type DrawAction =
   | { kind: 'stroke'; stroke: Stroke }
   | { kind: 'clear' }
@@ -43,6 +50,8 @@ export interface Settings {
   lassoGesture: 'four-fingertip' | 'index-only'; lassoHoldMs: number;
   confirmationHoldMs: number;
   shapeEditMode: 'scale' | 'points'; shapeResizeMode: 'proportional' | 'free';
+  reactionsEnabled: boolean; reactionSlots: ReactionSlot[];
+  reactionIntensity: 'subtle' | 'normal'; reactionDurationMs: number;
 }
 export interface HistoryState { actions: DrawAction[]; position: number; active: Stroke | null }
 export interface BoardState { settings: Settings; history: HistoryState; selection: string[] }

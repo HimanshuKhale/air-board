@@ -1,7 +1,7 @@
 import { button, toolbar } from './toolbar';
 export function presentation(): string {
   return `<main class="presentation-main">
-    <div class="board" id="board"><canvas id="background" aria-hidden="true"></canvas><canvas id="drawing" aria-label="Teaching whiteboard. Draw with a mouse, touch, or pinch."></canvas><canvas id="overlay" aria-hidden="true"></canvas></div>
+    <div class="board" id="board"><canvas id="background" aria-hidden="true"></canvas><canvas id="drawing" aria-label="Teaching whiteboard. Draw with a mouse, touch, or pinch."></canvas><canvas id="overlay" aria-hidden="true"></canvas><div id="reaction-layer" class="reaction-layer" aria-live="polite" aria-label="Live reactions"></div></div>
     <video id="camera-video" muted playsinline class="hidden-video"></video>
     <div class="reveal-edge" id="reveal-edge" aria-hidden="true"></div>
     <div class="presentation-controls" id="presentation-controls">

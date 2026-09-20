@@ -1,4 +1,4 @@
-import type { BoardObject, BoardState, Brush, Point, Settings } from '../core/types';
+import type { BoardObject, BoardState, Brush, Point, ReactionEmoji, ReactionGesture, Settings } from '../core/types';
 import { appendPoint, beginStroke, clear, createDiagram, createObject, deleteObject, finishStroke, moveStrokes, redo, replaceStroke, replaceStrokes, undo, updateObject } from '../drawing/history';
 import { homographyFromQuad } from '../calibration/homography';
 import { validPolygon, vertexBounds } from '../drawing/geometry';
@@ -21,6 +21,8 @@ const range = (v: unknown, min: number, max: number): v is number => typeof v ==
 const color = (v: unknown) => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
 const point = (v: unknown): v is Point => object(v) && range(v.x, 0, 1600) && range(v.y, 0, 900);
 const id = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length < 100;
+const reactionSlots = (v: unknown): boolean => Array.isArray(v) && v.length === 4 && v.every(slot => object(slot) &&
+  ['thumbs-up', 'finger-heart', 'v-sign', 'shaka'].includes(String(slot.gesture as ReactionGesture)) && ['👍', '❤️', '🎉', '🤙', '👏', '⭐'].includes(String(slot.emoji as ReactionEmoji)) && typeof slot.enabled === 'boolean' && Object.keys(slot).every(key => ['gesture', 'emoji', 'enabled'].includes(key))) && new Set(v.map(slot => (slot as Record<string, unknown>).gesture)).size === 4;
 export function validBoardObject(v: unknown): v is BoardObject {
   if (!object(v) || !id(v.id) || !['line', 'square', 'rectangle', 'parallelogram', 'trapezoid', 'pentagon', 'hexagon', 'polygon', 'circle', 'ellipse', 'triangle', 'arrow', 'text', 'connector'].includes(String(v.type)) ||
     !range(v.x, 0, 1600) || !range(v.y, 0, 900) || !range(v.width, 1, 1600) || !range(v.height, 1, 900) ||
@@ -76,6 +78,10 @@ export function validSettingsPatch(v: unknown): v is Partial<Settings> {
       case 'confirmationHoldMs': return range(value, 300, 500);
       case 'shapeEditMode': return value === 'scale' || value === 'points';
       case 'shapeResizeMode': return value === 'proportional' || value === 'free';
+      case 'reactionsEnabled': return typeof value === 'boolean';
+      case 'reactionSlots': return reactionSlots(value);
+      case 'reactionIntensity': return value === 'subtle' || value === 'normal';
+      case 'reactionDurationMs': return range(value, 1500, 4000);
       default: return false;
     }
   });
@@ -99,7 +105,7 @@ export function validCommand(v: unknown): v is Command {
   }
 }
 export function validState(v: unknown): v is BoardState {
-  const requiredSettings = ['brush', 'background', 'smoothing', 'pinchClose', 'pinchOpen', 'debounceMs', 'paused', 'autoHide', 'dominantHand', 'gestureSensitivity', 'inputMode', 'stylusOffset', 'penGripHoldMs', 'openPalmHoldMs', 'palmEraserSize', 'planePoints', 'lassoCloseRadius', 'lassoGesture', 'lassoHoldMs', 'fistGrabRadius', 'twoHandHoldMs', 'twoHandProximity', 'smartShapes', 'recognitionMode'];
+  const requiredSettings = ['brush', 'background', 'smoothing', 'pinchClose', 'pinchOpen', 'debounceMs', 'paused', 'autoHide', 'dominantHand', 'gestureSensitivity', 'inputMode', 'stylusOffset', 'penGripHoldMs', 'openPalmHoldMs', 'palmEraserSize', 'planePoints', 'lassoCloseRadius', 'lassoGesture', 'lassoHoldMs', 'fistGrabRadius', 'twoHandHoldMs', 'twoHandProximity', 'smartShapes', 'recognitionMode', 'reactionsEnabled', 'reactionSlots', 'reactionIntensity', 'reactionDurationMs'];
   if (!object(v) || !object(v.settings) || !validSettingsPatch(v.settings) || !requiredSettings.every(key => Object.hasOwn(v.settings as object, key)) || !object(v.history) || !Array.isArray(v.selection) || !v.selection.every(id)) return false;
   const h = v.history;
   const stroke = (s: unknown) => object(s) && id(s.id) && validBrush(s.brush) && Array.isArray(s.points) && s.points.length > 0 && s.points.length <= 12000 && s.points.every(point);

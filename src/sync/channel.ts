@@ -2,7 +2,10 @@ import { initialState } from '../core/settings';
 import { finishStroke } from '../drawing/history';
 import { reduce, validCommand, validState, type Command } from './protocol';
 import type { BoardState } from '../core/types';
-export type Signal = { kind: 'camera-request' | 'camera-status' | 'export-request'; sender: string; [key: string]: unknown };
+import type { ReactionEvent } from '../core/types';
+import { defaults } from '../core/settings';
+import { validReactionEvent } from '../reactions/event';
+export type Signal = { kind: 'camera-request' | 'camera-status' | 'export-request' | 'reaction'; sender: string; event?: ReactionEvent; [key: string]: unknown };
 /** A Web Lock elects one command sequencer. Followers keep a full replica for failover. */
 export class BoardChannel {
   readonly id = crypto.randomUUID();
@@ -99,6 +102,10 @@ export class BoardChannel {
       this.state.settings.recognitionMode ??= 'shapes';
       this.state.settings.lassoGesture ??= 'four-fingertip';
       this.state.settings.lassoHoldMs ??= 220;
+      this.state.settings.reactionsEnabled ??= true;
+      this.state.settings.reactionSlots ??= defaults().reactionSlots;
+      this.state.settings.reactionIntensity ??= 'normal';
+      this.state.settings.reactionDurationMs ??= 2500;
       this.applied = new Set(m.applied as string[]);
       for (const id of this.applied) this.unacknowledged.delete(id);
       this.ready = true; this.onChange(); this.flush();
@@ -111,6 +118,7 @@ export class BoardChannel {
       reduce(this.state, m.command); this.remember(m.requestId); this.revision = m.revision as number; this.onChange(m.command, m.requestId);
     }
     if (['camera-request', 'camera-status', 'export-request'].includes(String(m.kind)) && typeof m.sender === 'string') this.onSignal(m as Signal);
+    if (m.kind === 'reaction' && typeof m.sender === 'string' && validReactionEvent(m.event)) this.onSignal(m as Signal);
   }
   close(): void { clearInterval(this.retry); this.abort.abort(); this.release?.(); this.channel.close(); }
 }

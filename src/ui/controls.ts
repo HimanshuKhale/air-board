@@ -10,6 +10,7 @@ export interface ControlsActions {
   calibrateStylus(): void; resetStylus(): void;
   createShape(type: ShapeKind): void;
   verifyHand(hand: 'Left' | 'Right'): void;
+  previewReaction(slot: number): void;
 }
 export function bindControls(bus: BoardChannel, actions: ControlsActions): void {
   const sendSettings = (patch: Partial<Settings>) => { actions.interrupt(); bus.send({ type: 'settings', patch }); };
@@ -62,6 +63,12 @@ export function bindControls(bus: BoardChannel, actions: ControlsActions): void 
       case 'reset-stylus': actions.resetStylus(); break;
       case 'verify-right-hand': actions.verifyHand('Right'); break;
       case 'verify-left-hand': actions.verifyHand('Left'); break;
+      case 'preview-reaction': actions.previewReaction(Number(button.dataset.slot)); break;
+      case 'reset-reactions': {
+        const d = defaults();
+        sendSettings({ reactionsEnabled: d.reactionsEnabled, reactionSlots: d.reactionSlots.map(slot => ({ ...slot })), reactionIntensity: d.reactionIntensity, reactionDurationMs: d.reactionDurationMs });
+        break;
+      }
       case 'reset-settings': {
         const d = defaults();
         sendSettings({ smoothing: d.smoothing, pinchClose: d.pinchClose, pinchOpen: d.pinchOpen, debounceMs: d.debounceMs, background: { ...settings.background, mirror: true } });
@@ -71,6 +78,13 @@ export function bindControls(bus: BoardChannel, actions: ControlsActions): void 
   });
   document.addEventListener('input', event => {
     const input = event.target as HTMLInputElement;
+    if (input.dataset.reactionSlot !== undefined) {
+      const index = Number(input.dataset.reactionSlot), slots = bus.state.settings.reactionSlots.map(slot => ({ ...slot }));
+      if (!Number.isInteger(index) || !slots[index]) return;
+      if (input.type === 'checkbox') slots[index].enabled = input.checked;
+      else slots[index].emoji = input.value as Settings['reactionSlots'][number]['emoji'];
+      sendSettings({ reactionSlots: slots }); return;
+    }
     const name = input.dataset.setting;
     if (!name) return;
     const s = bus.state.settings;
@@ -83,13 +97,14 @@ export function bindControls(bus: BoardChannel, actions: ControlsActions): void 
       case 'dim': sendSettings({ background: { ...s.background, dim: Number(input.value) } }); break;
       case 'positionX': case 'positionY': sendSettings({ background: { ...s.background, [name]: Number(input.value) } }); break;
       case 'autoHide': sendSettings({ autoHide: input.checked }); break;
-      case 'smartShapes': case 'autoConvertShapes': sendSettings({ [name]: input.checked }); break;
+      case 'smartShapes': case 'autoConvertShapes': case 'reactionsEnabled': sendSettings({ [name]: input.checked }); break;
       case 'dominantHand': sendSettings({ dominantHand: input.value as Settings['dominantHand'] }); break;
       case 'inputMode': sendSettings({ inputMode: input.value as Settings['inputMode'] }); break;
       case 'recognitionMode': sendSettings({ recognitionMode: input.value as Settings['recognitionMode'] }); break;
       case 'lassoGesture': sendSettings({ lassoGesture: input.value as Settings['lassoGesture'] }); break;
       case 'gestureSensitivity': sendSettings({ gestureSensitivity: input.value as Settings['gestureSensitivity'] }); break;
-      case 'openPalmHoldMs': case 'palmEraserSize': case 'lassoCloseRadius': case 'lassoHoldMs': case 'penGripHoldMs': case 'fistGrabRadius': case 'twoHandHoldMs': case 'twoHandProximity': case 'confirmationHoldMs': sendSettings({ [name]: Number(input.value) }); break;
+      case 'reactionIntensity': sendSettings({ reactionIntensity: input.value as Settings['reactionIntensity'] }); break;
+      case 'openPalmHoldMs': case 'palmEraserSize': case 'lassoCloseRadius': case 'lassoHoldMs': case 'penGripHoldMs': case 'fistGrabRadius': case 'twoHandHoldMs': case 'twoHandProximity': case 'confirmationHoldMs': case 'reactionDurationMs': sendSettings({ [name]: Number(input.value) }); break;
       case 'smoothing': case 'pinchClose': case 'pinchOpen': case 'debounceMs': sendSettings({ [name]: Number(input.value) }); break;
     }
   });
@@ -134,9 +149,14 @@ export function updateControls(bus: BoardChannel): void {
     const key = input.dataset.setting!;
     const values: Record<string, string | number | boolean> = { ink: s.brush.color, size: s.brush.size, opacity: s.brush.opacity, 'board-color': s.background.color,
       fit: s.background.fit, mirror: s.background.mirror, dim: s.background.dim, positionX: s.background.positionX, positionY: s.background.positionY, smoothing: s.smoothing, pinchClose: s.pinchClose, pinchOpen: s.pinchOpen, debounceMs: s.debounceMs, autoHide: s.autoHide,
-      dominantHand: s.dominantHand, inputMode: s.inputMode, recognitionMode: s.recognitionMode, lassoGesture: s.lassoGesture, gestureSensitivity: s.gestureSensitivity, openPalmHoldMs: s.openPalmHoldMs, palmEraserSize: s.palmEraserSize, lassoCloseRadius: s.lassoCloseRadius, lassoHoldMs: s.lassoHoldMs, penGripHoldMs: s.penGripHoldMs, fistGrabRadius: s.fistGrabRadius, twoHandHoldMs: s.twoHandHoldMs, twoHandProximity: s.twoHandProximity, smartShapes: s.smartShapes, autoConvertShapes: s.autoConvertShapes, confirmationHoldMs: s.confirmationHoldMs };
+      dominantHand: s.dominantHand, inputMode: s.inputMode, recognitionMode: s.recognitionMode, lassoGesture: s.lassoGesture, gestureSensitivity: s.gestureSensitivity, openPalmHoldMs: s.openPalmHoldMs, palmEraserSize: s.palmEraserSize, lassoCloseRadius: s.lassoCloseRadius, lassoHoldMs: s.lassoHoldMs, penGripHoldMs: s.penGripHoldMs, fistGrabRadius: s.fistGrabRadius, twoHandHoldMs: s.twoHandHoldMs, twoHandProximity: s.twoHandProximity, smartShapes: s.smartShapes, autoConvertShapes: s.autoConvertShapes, confirmationHoldMs: s.confirmationHoldMs, reactionsEnabled: s.reactionsEnabled, reactionIntensity: s.reactionIntensity, reactionDurationMs: s.reactionDurationMs };
     if (input.type === 'checkbox') input.checked = Boolean(values[key]);
     else if (String(values[key]) !== input.value) input.value = String(values[key]);
+  });
+  document.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-reaction-slot]').forEach(input => {
+    const slot = s.reactionSlots[Number(input.dataset.reactionSlot)]; if (!slot) return;
+    if (input instanceof HTMLInputElement && input.type === 'checkbox') input.checked = slot.enabled;
+    else input.value = slot.emoji;
   });
   document.querySelectorAll('[data-size]').forEach(output => { output.textContent = String(s.brush.size); });
   document.querySelectorAll<HTMLElement>('[data-image-controls]').forEach(section => { section.hidden = s.background.mode !== 'image'; });

@@ -1,4 +1,4 @@
-import type { BoardState, Brush, Point, Settings, Size } from '../core/types';
+import { BOARD, type BoardState, type Brush, type Point, type ReactionEvent, type Settings, type Size } from '../core/types';
 import type { Command } from '../sync/protocol';
 import type { TrackingResult } from '../tracking/protocol';
 import { GestureController } from '../input/gesture';
@@ -11,12 +11,14 @@ import { currentObjects, currentStrokes } from '../drawing/history';
 import { nearestObject, selectObjects } from '../drawing/objects';
 import { bounds, nearestStroke, pathLength, selectStrokes, validLasso } from '../selection/geometry';
 import type { MovePreview } from '../drawing/history';
-import { TwoHandToggle } from './two-hand';
+import { TwoHandToggle, twoHandsClose } from './two-hand';
 import { applyStylusOffset, calibrateStylusOffset, virtualNib } from './stylus';
 import { homographyFromQuad } from '../calibration/homography';
 import { nearestShapeHandle, shapeHandles, transformObject, type ShapeHandle } from '../drawing/transform';
 import type { BoardObject } from '../core/types';
 import { PenWritingController } from './pen-writing';
+import { ReactionController, type ReactionState } from '../reactions/controller';
+import { classifyReactionPose } from '../reactions/pose';
 
 export type InteractionMode = 'hover' | 'write' | 'erase' | 'lasso' | 'drag' | 'shape-transform' | 'plane-calibration' | 'stylus-calibration';
 export interface InteractionDiagnostics {
@@ -27,6 +29,7 @@ export interface InteractionDiagnostics {
   inputMode: Settings['inputMode']; virtualNibPoint: Point | null; twoHandClose: boolean; twoHandHeldMs: number;
   confirmationGesture: ConfirmationPose; confirmationConfidence: number;
   writingHand: 'Left' | 'Right'; confirmationHand: 'Left' | 'Right'; penDown: boolean; fourFingertipConfidence: number;
+  reactionState: ReactionState; reactionGesture: string; reactionConfidence: number;
 }
 export interface InteractionHooks {
   send(command: Command): void;
@@ -41,6 +44,7 @@ export interface InteractionHooks {
   confirmationPending?(): boolean;
   confirmationPose?(pose: ConfirmationPose, confidence: number, now: number): void;
   confirmationInterrupted?(): void;
+  reaction?(event: ReactionEvent): void;
 }
 export interface InteractionVisuals { lasso: Point[]; lassoStart: Point | null; planeTarget: number | null; planeCaptured: Point[]; movePreview: MovePreview | null; objectPreview: BoardObject | null; stylusTarget: boolean }
 
@@ -52,12 +56,14 @@ export class InteractionController {
     lassoActive: false, selectedStrokeCount: 0, grabbedStrokeId: null, planeCalibrationActive: false, planeCalibrationValid: false,
     inputMode: 'finger', virtualNibPoint: null, twoHandClose: false, twoHandHeldMs: 0, confirmationGesture: 'neutral', confirmationConfidence: 0,
     writingHand: 'Right', confirmationHand: 'Left', penDown: false, fourFingertipConfidence: 0,
+    reactionState: 'IDLE', reactionGesture: 'neutral', reactionConfidence: 0,
   };
   readonly visuals: InteractionVisuals = { lasso: [], lassoStart: null, planeTarget: null, planeCaptured: [], movePreview: null, objectPreview: null, stylusTarget: false };
   private gesture = new GestureController();
   private pen = new PenWritingController();
   private pose = new PoseStabilizer();
   private twoHand = new TwoHandToggle();
+  private reaction = new ReactionController();
   private palmFilter = new ExponentialFilter(0.55);
   private fistFilter = new ExponentialFilter(0.55);
   private eraserId: string | null = null;
@@ -107,9 +113,11 @@ export class InteractionController {
       this.diagnostics.confirmationGesture = 'neutral'; this.diagnostics.confirmationConfidence = 0;
     }
     const operationActive = !!this.shapeTransform || !!this.lasso.length || this.pen.down || this.erasing || !!this.drag;
+    const proximityClose = twoHandsClose(hands.map(hand => hand.landmarks), size, settings.twoHandProximity);
     const toggleHandControl = confirmationPending || operationActive ? false : this.twoHand.update(hands.map(hand => hand.landmarks), size, now, settings.twoHandHoldMs, settings.twoHandProximity);
-    this.diagnostics.twoHandClose = this.twoHand.state.close; this.diagnostics.twoHandHeldMs = this.twoHand.state.heldMs;
+    this.diagnostics.twoHandClose = confirmationPending ? false : proximityClose; this.diagnostics.twoHandHeldMs = this.twoHand.state.heldMs;
     if (toggleHandControl) {
+      this.reaction.suppress();
       this.cancelActive(); this.cancelCalibrations();
       const paused = !settings.paused;
       this.hooks.send({ type: 'settings', patch: { paused } });
@@ -117,8 +125,20 @@ export class InteractionController {
       this.hooks.toast(paused ? 'Hand Control Paused. Mouse and touch remain available.' : 'Hand Control Enabled.');
       return;
     }
-    if (!operationActive && this.twoHand.state.close) { this.hooks.endPinch(); this.diagnostics.interaction = 'hover'; return; }
-    if (settings.paused) { this.cancelActive(); this.diagnostics.handControl = 'paused'; return; }
+    if (!confirmationPending && !operationActive && proximityClose) { this.reaction.suppress(); this.syncReactionDiagnostics(); this.hooks.endPinch(); this.diagnostics.interaction = 'hover'; return; }
+    if (settings.paused) { this.reaction.suppress(); this.syncReactionDiagnostics(); this.cancelActive(); this.diagnostics.handControl = 'paused'; return; }
+    const calibrating = !!this.planeCapture || this.stylusCapture;
+    if (confirmationPending || calibrating || proximityClose || !settings.reactionsEnabled) this.reaction.suppress();
+    else {
+      const source = hands.find(hand => hand.name === confirmationHand && hand.landmarks.length === 21);
+      if (source) {
+        const pose = classifyReactionPose(source.landmarks, size);
+        const mapped = this.hooks.map(pose.anchor, size, settings);
+        const event = this.reaction.update(pose, { x: Math.max(0, Math.min(1, mapped.x / BOARD.width)), y: Math.max(0, Math.min(1, mapped.y / BOARD.height)) }, now, settings);
+        if (event) this.hooks.reaction?.(event);
+      } else this.reaction.trackingLost();
+    }
+    this.syncReactionDiagnostics();
     const dominant = hands.find(hand => hand.name === settings.dominantHand && hand.landmarks.length === 21);
     if (!dominant) { this.cancelActive(); return; }
     if (this.lastDominant && this.lastDominant !== dominant.name) this.reset();
@@ -393,9 +413,10 @@ export class InteractionController {
     this.pointer = null;
     Object.assign(this.diagnostics, { instantaneousGesture: 'neutral', stableGesture: 'neutral', gestureEnterMs: 0, interaction: 'hover', rawPoint: null, mappedPoint: null, virtualNibPoint: null, grabbedStrokeId: null, penDown: false, fourFingertipConfidence: 0 });
   }
+  private syncReactionDiagnostics(): void { Object.assign(this.diagnostics, { reactionState: this.reaction.state, reactionGesture: this.reaction.gesture, reactionConfidence: this.reaction.confidence }); }
   private cancelCalibrations(): void {
     this.planeCapture = null; this.visuals.planeCaptured = []; this.visuals.planeTarget = null; this.diagnostics.planeCalibrationActive = false;
     this.stylusCapture = false; this.visuals.stylusTarget = false;
   }
-  reset(): void { this.cancelActive(); this.cancelCalibrations(); this.twoHand.reset(); Object.assign(this.diagnostics, { twoHandClose: false, twoHandHeldMs: 0 }); }
+  reset(): void { this.cancelActive(); this.cancelCalibrations(); this.twoHand.reset(); this.reaction.trackingLost(); this.syncReactionDiagnostics(); Object.assign(this.diagnostics, { twoHandClose: false, twoHandHeldMs: 0 }); }
 }

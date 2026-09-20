@@ -10,7 +10,7 @@ export function studio(): string {
     <section class="workspace">
       <div class="workspace-heading"><div><p class="eyebrow">YOUR TEACHING SPACE</p><h1>A little space for big ideas.</h1></div><span class="board-label">16:9 board <span>·</span> 1600 × 900</span></div>
       <div class="board-shell"><div class="board" id="board">
-        <canvas id="background" aria-hidden="true"></canvas><canvas id="drawing" aria-label="Teaching whiteboard. Draw with a mouse, touch, finger pinch, or Pen Writing grip."></canvas><canvas id="overlay" aria-hidden="true"></canvas>
+        <canvas id="background" aria-hidden="true"></canvas><canvas id="drawing" aria-label="Teaching whiteboard. Draw with a mouse, touch, finger pinch, or Pen Writing grip."></canvas><canvas id="overlay" aria-hidden="true"></canvas><div id="reaction-layer" class="reaction-layer" aria-live="polite" aria-label="Live reactions"></div>
         <div class="board-welcome" id="board-welcome"><span class="welcome-icon">${icon('pen')}</span><h2>Your next idea starts here.</h2><p>Use Finger mode, or choose Pen Writing for a physical pen grip.</p><span>FINGER PINCH OR PEN GRIP <b>·</b> RELEASE TO MOVE</span></div>
       </div>
       <div class="toolbar studio-toolbar" id="toolbar" aria-label="Drawing tools">${toolbar()}${button('export', 'Save', 'save', 'class="gesture-extra"')}${button('settings', 'Settings', 'settings', 'class="gesture-extra"')}${button('background', 'Background', 'board', 'class="gesture-extra"')}</div></div>

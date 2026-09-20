@@ -24,6 +24,12 @@ export const fingerExtensionScores = (points: Point[], size: Size): number[] => 
   });
 };
 const palmScale = (points: Point[], size: Size): number => Math.max(1, (distance(points[0], points[9], size) + distance(points[5], points[17], size)) / 2);
+export const thumbExtensionScore = (points: Point[], size: Size): number => {
+  if (points.length !== 21) return 0;
+  const straight = Math.min(angle(points[1], points[2], points[3], size), angle(points[2], points[3], points[4], size));
+  const radial = distance(points[4], points[0], size) / Math.max(1, distance(points[2], points[0], size));
+  return Math.min(1, Math.max(0, (straight - 105) / 55)) * .55 + Math.min(1, Math.max(0, (radial - 1.08) / .42)) * .45;
+};
 
 /** All four non-thumb fingertips converge on the thumb, while the cluster remains away from the palm. */
 export function classifyFourFingertipPinch(points: Point[], size: Size): BinaryPoseClassification {
@@ -67,9 +73,7 @@ export function classifyPose(points: Point[], size: Size, pinchClose = 0.28): Po
 export function classifyConfirmationPose(points: Point[], size: Size): ConfirmationClassification {
   if (points.length !== 21 || points.some(point => !Number.isFinite(point.x) || !Number.isFinite(point.y))) return { gesture: 'neutral', confidence: 0, scores: [0, 0, 0, 0, 0] };
   const fingers = fingerExtensionScores(points, size);
-  const thumbStraight = Math.min(angle(points[1], points[2], points[3], size), angle(points[2], points[3], points[4], size));
-  const thumbRadial = distance(points[4], points[0], size) / Math.max(1, distance(points[2], points[0], size));
-  const thumb = Math.min(1, Math.max(0, (thumbStraight - 105) / 55)) * .55 + Math.min(1, Math.max(0, (thumbRadial - 1.08) / .42)) * .45;
+  const thumb = thumbExtensionScore(points, size);
   const scores: [number, number, number, number, number] = [thumb, fingers[0], fingers[1], fingers[2], fingers[3]];
   const palm = palmScale(points, size);
   const vSeparation = distance(points[8], points[12], size) / palm;

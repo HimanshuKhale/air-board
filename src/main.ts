@@ -3,7 +3,7 @@ import { studio } from './ui/studio';
 import { presentation } from './ui/presentation';
 import { dialogs } from './ui/dialogs';
 import { bindControls, updateControls } from './ui/controls';
-import { BOARD, type Stroke } from './core/types';
+import { BOARD, type ReactionEvent, type Stroke } from './core/types';
 import { cameraToCanvas, canvasToClient } from './core/coordinates';
 import { BoardChannel } from './sync/channel';
 import { DrawingEngine } from './drawing/engine';
@@ -30,6 +30,7 @@ import { makeShape } from './drawing/geometry';
 import { recognizeDigit } from './drawing/digits';
 import { bounds } from './selection/geometry';
 import { chooseRecognition } from './drawing/smart-recognition';
+import { ReactionLayer } from './reactions/layer';
 
 const isPresentation = location.pathname === '/present';
 document.body.classList.toggle('is-presentation', isPresentation);
@@ -49,6 +50,7 @@ const overlayContext = overlayCanvas.getContext('2d')!;
 const background = new BackgroundRenderer(video);
 const initial = initialState(); initial.settings = loadHandSettings(defaults());
 const bus = new BoardChannel(initial);
+const reactionLayer = new ReactionLayer(el('reaction-layer'));
 bus.onRejected = (requestId, reason) => { if (aiRequestIds.delete(requestId)) { aiStatus(`${reason}. Please repeat the command.`); aiLog(`Skipped: ${reason}.`); } };
 const speech = new SpeechController();
 const camera = new CameraSession(video, bus, isPresentation ? 'Presentation' : 'Studio');
@@ -74,6 +76,7 @@ const interactions = new InteractionController({
     if (result) resolvePendingConfirmation(result.id, result.decision);
   },
   confirmationInterrupted: () => confirmation.interrupt(),
+  reaction: event => { if (camera.active) emitReaction(event); },
   toast,
   showPointer: (point, diameter, held, label) => {
     const client = canvasToClient(point, drawing.canvas.getBoundingClientRect(), BOARD);
@@ -176,6 +179,10 @@ function toast(message: string): void {
   const target = el('toast'); target.textContent = message; target.classList.add('visible');
   clearTimeout(toastTimer); toastTimer = window.setTimeout(() => target.classList.remove('visible'), 5500);
 }
+function emitReaction(event: ReactionEvent, broadcast = true): void {
+  if (!reactionLayer.show(event)) return;
+  if (broadcast) bus.signal({ kind: 'reaction', event });
+}
 function reveal(): void { controlsUntil = performance.now() + 5500; el('presentation-controls')?.classList.remove('controls-hidden'); }
 function releaseHand(): void {
   hand = null; interactions.reset(); input.endHand(); confirmation.interrupt(); camera.hand = false;
@@ -261,6 +268,10 @@ bindControls(bus, {
   calibrateStylus: () => interactions.startStylusCalibration(),
   resetStylus: () => interactions.resetStylusCalibration(),
   verifyHand: hand => interactions.startHandednessCheck(hand),
+  previewReaction: index => {
+    const slot = bus.state.settings.reactionSlots[index]; if (!slot) return;
+    emitReaction({ id: crypto.randomUUID(), type: slot.gesture, emoji: slot.emoji, position: { x: .28 + index * .14, y: .45 }, createdAt: Date.now(), duration: bus.state.settings.reactionDurationMs, intensity: bus.state.settings.reactionIntensity });
+  },
   createShape: type => {
     const count = currentObjects(bus.state.history).length;
     const width = ['line', 'arrow'].includes(type) ? 240 : type === 'square' || type === 'circle' ? 150 : 220;
@@ -295,6 +306,7 @@ bus.onChange = (command, requestId) => {
 bus.onSignal = signal => {
   camera.receive(signal);
   if (signal.kind === 'export-request' && signal.target === bus.id && camera.active) void exportBoard(signal.transparent === true);
+  if (signal.kind === 'reaction' && signal.event) reactionLayer.show(signal.event);
 };
 camera.onStatus = message => {
   el('tracking-status').textContent = message;
@@ -350,7 +362,7 @@ document.querySelectorAll<HTMLInputElement>('#debug-toggle,[data-pipeline-debug]
 document.addEventListener('visibilitychange', () => { if (document.hidden) { releaseHand(); input.end(); } });
 window.addEventListener('blur', releaseHand);
 navigator.mediaDevices?.addEventListener('devicechange', () => { void listCameras(); });
-window.addEventListener('pagehide', () => { if (digitGroup) clearTimeout(digitGroup.timer); speech.stop(); camera.close(); bus.close(); }, { once: true });
+window.addEventListener('pagehide', () => { if (digitGroup) clearTimeout(digitGroup.timer); reactionLayer.clear(); speech.stop(); camera.close(); bus.close(); }, { once: true });
 window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
 let frame = 0;
 function render(now: number): void {
@@ -380,6 +392,7 @@ function render(now: number): void {
       `Writing/manipulation role: ${interaction.writingHand}; confirmation role: ${interaction.confirmationHand}`,
       `Gesture: ${interaction.instantaneousGesture}; stable: ${interaction.stableGesture}; enter: ${Math.round(interaction.gestureEnterMs)} ms`,
       `Confirmation: ${interaction.confirmationGesture} (${interaction.confirmationConfidence.toFixed(2)}); four-fingertip pinch: ${interaction.fourFingertipConfidence.toFixed(2)}`,
+      `Reaction: ${interaction.reactionGesture} (${interaction.reactionConfidence.toFixed(2)}); state: ${interaction.reactionState}`,
       `Active interaction: ${interaction.interaction}; hand control: ${interaction.handControl}`,
       `Two-hand close: ${interaction.twoHandClose}; hold: ${Math.round(interaction.twoHandHeldMs)} ms`,
       `Lasso active: ${interaction.lassoActive}; selected strokes: ${interaction.selectedStrokeCount}; grabbed: ${interaction.grabbedStrokeId ?? 'none'}`,
